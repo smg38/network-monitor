@@ -1,6 +1,7 @@
 #!/bin/bash
-# nm-install.sh - Установщик системы мониторинга сети
-# Версия: 1.2
+# nm-install.sh - Установщик системы мониторинга сети  
+# Версия: 1.3
+# Автор: TG: @smg38 smg38@yandex.ru
 # Запуск: sudo ./nm-install.sh
 
 set -e  # Выход при ошибке
@@ -131,16 +132,16 @@ create_directories() {
     log "INFO" "Создание структуры директорий..."
     
     # Основная директория
-    mkdir -p "$BASE_DIR"
-    chmod 755 "$BASE_DIR"
+    sudo mkdir -p "$BASE_DIR"
+    sudo chmod 755 "$BASE_DIR"
     
-    # Директория для логов
-    mkdir -p "$LOG_DIR"
-    chmod 755 "$LOG_DIR"
+    # Директория для логов  
+    sudo mkdir -p "$LOG_DIR"
+    sudo chmod 755 "$LOG_DIR"
     
     # Директория для клиентских конфигов WireGuard (если нужно)
-    mkdir -p /etc/wireguard/clients
-    chmod 700 /etc/wireguard/clients
+    #mkdir -p /etc/wireguard/clients
+    #chmod 700 /etc/wireguard/clients
     
     log "INFO" "Директории созданы"
 }
@@ -269,7 +270,7 @@ INSERT INTO config (key, value) VALUES ('install_date', datetime('now'));
 INSERT INTO config (key, value) VALUES ('version', '1.2');
 EOF
 
-    chmod 644 "$DB_PATH"
+    sudo chmod 644 "$DB_PATH"
     log "INFO" "База данных создана: $DB_PATH"
 }
 
@@ -279,20 +280,21 @@ create_systemd_service() {
     
     local service_file="/etc/systemd/system/nm-daemon.service"
     
-    cat > "$service_file" <<EOF
+    sudo cat > "$service_file" <<EOF
 [Unit]
 Description=Network Monitor Daemon
-After=network.target network-online.target wg-quick@${WG_IFACE}.service
+After=network.target network-online.target wg-quick@%i.service
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
 Group=root
-WorkingDirectory=$BASE_DIR
+WorkingDirectory=\\\$BASE_DIR
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ExecStart=$BASE_DIR/nm-daemon.sh
-ExecReload=/bin/kill -HUP \$MAINPID
+EnvironmentFile=\\\$BASE_DIR/nm-config
+ExecStart=\\\$BASE_DIR/nm-daemon.sh
+ExecReload=/bin/kill -HUP \\\$MAINPID
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -321,16 +323,16 @@ copy_scripts() {
     log "INFO" "Копирование скриптов в $BASE_DIR..."
     
     # Копируем основной скрипт
-    cp nm-monitor.sh "$BASE_DIR/"
-    chmod 755 "$BASE_DIR/nm-monitor.sh"
+    sudo cp nm-monitor.sh "$BASE_DIR/"
+    sudo chmod 755 "$BASE_DIR/nm-monitor.sh"
     
     # Копируем демон
-    cp nm-daemon.sh "$BASE_DIR/"
-    chmod 755 "$BASE_DIR/nm-daemon.sh"
+    sudo cp nm-daemon.sh "$BASE_DIR/"
+    sudo chmod 755 "$BASE_DIR/nm-daemon.sh"
     
     # Копируем конфиг
-    cp nm-config "$BASE_DIR/"
-    chmod 644 "$BASE_DIR/nm-config"
+    sudo cp nm-config "$BASE_DIR/"
+    sudo chmod 644 "$BASE_DIR/nm-config"
     
     log "INFO" "Скрипты скопированы"
 }
