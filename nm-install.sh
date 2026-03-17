@@ -1,3 +1,4 @@
+
 #!/bin/bash
 # nm-install.sh - Установщик системы мониторинга сети  
 # Версия: 1.4
@@ -319,7 +320,7 @@ create_systemd_service() {
     
     tee "$service_file" <<EOF
 # nm-daemon.service - systemd сервис для Network Monitor
-# Версия: 1.4
+# Версия: 1.4.1
 # Автор: TG: @smg38 smg38@yandex.ru
 
 [Unit]
@@ -460,17 +461,20 @@ update_system() {
     log "INFO" "Обновление скриптов..."
     copy_scripts
     
-    log "INFO" "Обновление конфигурации..."
     # Обновляем версию в БД
     if [ -f "$DB_PATH" ]; then
         sqlite3 "$DB_PATH" "UPDATE config SET value='1.4', updated_at=datetime('now') WHERE key='version';"
     fi
     
+    log "INFO" "Перегенерация systemd сервиса..."
+    create_systemd_service
+    
     log "INFO" "Перезапуск сервиса..."
     systemctl daemon-reload
     systemctl start nm-daemon.service
     
-    log "INFO" "Обновление завершено успешно!"
+    log "INFO" "Обновление конфигурации..."
+    #log "INFO" "Обновление завершено успешно!"
     echo -e "\n${GREEN}${BOLD}Система мониторинга сети успешно обновлена до версии 1.4!${NC}"
 }
 
