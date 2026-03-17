@@ -318,35 +318,46 @@ create_systemd_service() {
     local service_file="/etc/systemd/system/nm-daemon.service"
     
     tee "$service_file" <<EOF
+# nm-daemon.service - systemd сервис для Network Monitor
+# Версия: 1.4
+# Автор: TG: @smg38 smg38@yandex.ru
+
 [Unit]
 Description=Network Monitor Daemon
 After=network.target network-online.target wg-quick@%i.service
 Wants=network-online.target
+Documentation=https://github.com/your-repo/network-monitor
 
 [Service]
 Type=simple
 User=root
 Group=root
-WorkingDirectory=\\\$BASE_DIR
+WorkingDirectory=${BASE_DIR}
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-EnvironmentFile=\\\$BASE_DIR/nm-config.sh
-ExecStart=\\\$BASE_DIR/nm-daemon.sh
-ExecReload=/bin/kill -HUP \\\$MAINPID
+EnvironmentFile=${BASE_DIR}/nm-config.sh
+ExecStart=${BASE_DIR}/nm-daemon.sh
+ExecReload=/bin/kill -HUP \$MAINPID
 Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=nm-daemon
 
-# Лимиты
+# Лимиты ресурсов
 LimitNOFILE=65536
 LimitNPROC=65536
+LimitCORE=infinity
 
 # Безопасность
 NoNewPrivileges=yes
 ProtectHome=yes
 ProtectSystem=full
 PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
 
 [Install]
 WantedBy=multi-user.target
