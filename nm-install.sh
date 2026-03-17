@@ -5,6 +5,9 @@
 # Запуск: sudo ./nm-install.sh
 
 set -e  # Выход при ошибке
+с мммммммММ
+# Определяем директорию скрипта
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Загружаем конфигурацию
 # shellcheck disable=SC1091
@@ -26,6 +29,38 @@ log() {
     esac
     
     echo -e "${timestamp} [${level}] ${message}" | tee -a "${LOG_DIR}/install.log"
+}
+
+# Обработка аргументов командной строки
+parse_args() {
+    ACTION="install"
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --uninstall|--remove)
+                ACTION="uninstall"
+                shift
+                ;;
+            --update|--upgrade)
+                ACTION="update"
+                shift
+                ;;
+            --help|-h)
+                echo "Использование: $0 [опции]"
+                echo ""
+                echo "Опции:"
+                echo "  --uninstall, --remove    Удалить установленную систему"
+                echo "  --update, --upgrade      Обновить установленную систему"
+                echo "  --help, -h               Показать эту справку"
+                exit 0
+                ;;
+            *)
+                echo "Неизвестная опция: $1"
+                echo "Используйте --help для справки"
+                exit 1
+                ;;
+        esac
+    done
 }
 
 # Проверка прав root
@@ -269,7 +304,7 @@ EOF
 INSERT INTO config (key, value) VALUES ('main_iface', '$MAIN_IFACE');
 INSERT INTO config (key, value) VALUES ('wg_iface', '$WG_IFACE');
 INSERT INTO config (key, value) VALUES ('install_date', datetime('now'));
-INSERT INTO config (key, value) VALUES ('version', '1.2');
+INSERT INTO config (key, value) VALUES ('version', '1.4');
 EOF
 
     sudo chmod 644 "$DB_PATH"
@@ -366,6 +401,68 @@ EOF
     log "INFO" "Logrotate настроен"
 }
 
+# Функция удаления системы
+uninstall_system() {
+    echo -e "${BOLD}${RED}Удаление системы мониторинга сети${NC}\n"
+    
+    check_root
+    setup_colors
+    
+    log "INFO" "Остановка сервиса..."
+    sudo systemctl stop nm-daemon.service 2>/dev/null || true
+    sudo systemctl disable nm-daemon.service 2>/dev/null || true
+    
+    log "INFO" "Удаление systemd сервиса..."
+    sudo rm -f /etc/systemd/system/nm-daemon.service
+    sudo systemctl daemon-reload
+    
+    log "INFO" "Удаление файлов..."
+    sudo rm -rf "$BASE_DIR"
+    sudo rm -rf "$LOG_DIR"
+    sudo rm -f /etc/logrotate.d/network-monitor
+    
+    log "INFO" "Удаление завершено успешно!"
+    echo -e "\n${GREEN}${BOLD}Система мониторинга сети успешно удалена!${NC}"
+}
+
+# Функция обновления системы
+update_system() {
+    echo -e "${BOLD}${BLUE}Обновление системы мониторинга сети${NC}\n"
+    
+    check_root
+    setup_colors
+    
+    # Проверяем, установлена ли система
+    if [ ! -d "$BASE_DIR" ] || [ ! -f "$BASE_DIR/nm-config.sh" ]; then
+        log "ERROR" "Система не установлена. Сначала выполните установку."
+        exit 1
+    fi
+    
+    log "INFO" "Остановка сервиса..."
+    sudo systemctl stop nm-daemon.service 2>/dev/null || true
+    
+    log "INFO" "Создание резервной копии базы данных..."
+    if [ -f "$DB_PATH" ]; then
+        sudo cp "$DB_PATH" "${DB_PATH}.backup.$(date +%Y%m%d_%H%M%S)"
+    fi
+    
+    log "INFO" "Обновление скриптов..."
+    copy_scripts
+    
+    log "INFO" "Обновление конфигурации..."
+    # Обновляем версию в БД
+    if [ -f "$DB_PATH" ]; then
+        sqlite3 "$DB_PATH" "UPDATE config SET value='1.4', updated_at=datetime('now') WHERE key='version';"
+    fi
+    
+    log "INFO" "Перезапуск сервиса..."
+    sudo systemctl daemon-reload
+    sudo systemctl start nm-daemon.service
+    
+    log "INFO" "Обновление завершено успешно!"
+    echo -e "\n${GREEN}${BOLD}Система мониторинга сети успешно обновлена до версии 1.4!${NC}"
+}
+
 # Проверка установки
 verify_installation() {
     log "INFO" "Проверка установки..."
@@ -401,18 +498,30 @@ verify_installation() {
 
 # Основная функция установки
 main() {
-    echo -e "${BOLD}${BLUE}Установка системы мониторинга сети v1.2${NC}\n"
+    parse_args "$@"
     
-    check_root
-    setup_colors
-    check_dependencies
-    select_interfaces
-    create_directories
-    create_database
-    copy_scripts
-    create_systemd_service
-    setup_logging
-    verify_installation
+    case "$ACTION" in
+        "install")
+            echo -e "${BOLD}${BLUE}Установка системы мониторинга сети v1.4${NC}\n"
+            
+            check_root
+            setup_colors
+            check_dependencies
+            select_interfaces
+            create_directories
+            create_database
+            copy_scripts
+            create_systemd_service
+            setup_logging
+            verify_installation
+            ;;
+        "uninstall")
+            uninstall_system
+            ;;
+        "update")
+            update_system
+            ;;
+    esac
 }
 
 # Запуск
