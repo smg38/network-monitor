@@ -1,19 +1,21 @@
 #!/bin/bash
 # nm-install.sh - Установщик системы мониторинга сети  
-# Версия: 1.3
+# Версия: 1.4
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запуск: sudo ./nm-install.sh
 
 set -e  # Выход при ошибке
 
 # Загружаем конфигурацию
-source ./nm-config
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/nm-config.sh"
 
 # Функция логирования
 log() {
     local level="$1"
     local message="$2"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     
     # Проверяем уровень логирования
     case "$LOG_LEVEL" in
@@ -77,7 +79,7 @@ select_interfaces() {
     log "INFO" "Поиск доступных сетевых интерфейсов..."
     
     # Получаем список всех интерфейсов (кроме loopback)
-    local interfaces=($(ip -o link show | awk -F': ' '{print $2}' | grep -v lo))
+    mapfile -t interfaces < <(ip -o link show | awk -F': ' '{print $2}' | grep -v lo)
     
     echo -e "\n${BOLD}Доступные сетевые интерфейсы:${NC}"
     for i in "${!interfaces[@]}"; do
@@ -280,7 +282,7 @@ create_systemd_service() {
     
     local service_file="/etc/systemd/system/nm-daemon.service"
     
-    sudo cat > "$service_file" <<EOF
+    sudo tee "$service_file" <<EOF
 [Unit]
 Description=Network Monitor Daemon
 After=network.target network-online.target wg-quick@%i.service
@@ -292,7 +294,7 @@ User=root
 Group=root
 WorkingDirectory=\\\$BASE_DIR
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-EnvironmentFile=\\\$BASE_DIR/nm-config
+EnvironmentFile=\\\$BASE_DIR/nm-config.sh
 ExecStart=\\\$BASE_DIR/nm-daemon.sh
 ExecReload=/bin/kill -HUP \\\$MAINPID
 Restart=always
@@ -331,8 +333,8 @@ copy_scripts() {
     sudo chmod 755 "$BASE_DIR/nm-daemon.sh"
     
     # Копируем конфиг
-    sudo cp nm-config "$BASE_DIR/"
-    sudo chmod 644 "$BASE_DIR/nm-config"
+    sudo cp nm-config.sh "$BASE_DIR/"
+    sudo chmod 644 "$BASE_DIR/nm-config.sh"
     
     log "INFO" "Скрипты скопированы"
 }
@@ -373,7 +375,7 @@ verify_installation() {
     # Проверяем наличие всех файлов
     [ -f "$BASE_DIR/nm-monitor.sh" ] || { log "ERROR" "nm-monitor.sh не найден"; errors=1; }
     [ -f "$BASE_DIR/nm-daemon.sh" ] || { log "ERROR" "nm-daemon.sh не найден"; errors=1; }
-    [ -f "$BASE_DIR/nm-config" ] || { log "ERROR" "nm-config не найден"; errors=1; }
+    [ -f "$BASE_DIR/nm-config.sh" ] || { log "ERROR" "nm-config.sh не найден"; errors=1; }
     [ -f "$DB_PATH" ] || { log "ERROR" "База данных не найдена"; errors=1; }
     
     # Проверяем права

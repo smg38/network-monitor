@@ -1,4 +1,4 @@
-# Network Monitor v1.3
+# Network Monitor v1.4
 
 [![Автор](https://img.shields.io/badge/TG-@smg38-blue)](https://t.me/smg38)
 [![Email](https://img.shields.io/badge/email-smg38%40yandex.ru-red)](mailto:smg38@yandex.ru)

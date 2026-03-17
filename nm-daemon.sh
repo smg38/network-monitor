@@ -1,6 +1,6 @@
 #!/bin/bash
 # nm-daemon.sh - Демон сбора и агрегации данных сетевого мониторинга
-# Версия: 1.3
+# Версия: 1.4
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запускается как systemd сервис
 
@@ -8,13 +8,15 @@ set -euo pipefail  # Строгий режим
 
 # Загружаем конфигурацию
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/nm-config"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/nm-config.sh"
 
 # Функция логирования
 log() {
     local level="$1"
     local message="$2"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     
     # Проверяем уровень логирования
     case "$LOG_LEVEL" in
@@ -72,11 +74,14 @@ need_to_run() {
     fi
     
     # Конвертируем время в секунды с эпохи
-    local last_run_epoch=$(date -d "$last_run" +%s 2>/dev/null || date -d "$last_run UTC" +%s)
-    local now_epoch=$(date +%s)
-    local diff=$((now_epoch - last_run_epoch))
+    local last_run_epoch
+    last_run_epoch=$(date -d "$last_run" +%s 2>/dev/null || date -d "$last_run UTC" +%s)
+    local now_epoch
+    now_epoch=$(date +%s)
+    local diff
+    diff=$((now_epoch - last_run_epoch))
     
-    if [ $diff -ge $interval ]; then
+    if [ "$diff" -ge "$interval" ]; then
         log "DEBUG" "Задача ${task_type}:${task_key} требует запуска (прошло ${diff}с, интервал ${interval}с)"
         return 0
     else
@@ -101,15 +106,15 @@ collect_interface_data() {
     
     # Парсим строку
     # Пример: ens3: 19042911454 48592510 0 0 0 0 0 0 15742593469 14974526 0 0 0 0 0 0
-    rx_bytes=$(echo $line | awk '{print $2}')
-    rx_packets=$(echo $line | awk '{print $3}')
-    rx_errors=$(echo $line | awk '{print $4}')
-    rx_drop=$(echo $line | awk '{print $5}')
+    rx_bytes=$(echo "$line" | awk '{print $2}')
+    rx_packets=$(echo "$line" | awk '{print $3}')
+    rx_errors=$(echo "$line" | awk '{print $4}')
+    rx_drop=$(echo "$line" | awk '{print $5}')
     
-    tx_bytes=$(echo $line | awk '{print $10}')
-    tx_packets=$(echo $line | awk '{print $11}')
-    tx_errors=$(echo $line | awk '{print $12}')
-    tx_drop=$(echo $line | awk '{print $13}')
+    tx_bytes=$(echo "$line" | awk '{print $10}')
+    tx_packets=$(echo "$line" | awk '{print $11}')
+    tx_errors=$(echo "$line" | awk '{print $12}')
+    tx_drop=$(echo "$line" | awk '{print $13}')
     
     # Вставляем в БД
     sqlite3 "$DB_PATH" <<EOF
@@ -144,18 +149,19 @@ collect_wg_data() {
     
     # Парсим вывод wg show dump
     # Формат: private_key public_key endpoint allowed_ips latest_handshake transfer_rx transfer_tx persistent_keepalive
-    echo "$peers_output" | while read line; do
+    echo "$peers_output" | while read -r line; do
         # Пропускаем первую строку (приватный ключ интерфейса)
         if [[ "$line" == *"private_key"* ]]; then
             continue
         fi
         
-        public_key=$(echo $line | awk '{print $2}')
-        endpoint=$(echo $line | awk '{print $3}')
-        allowed_ips=$(echo $line | awk '{print $4}')
-        handshake_seconds=$(echo $line | awk '{print $5}')
-        rx_bytes=$(echo $line | awk '{print $6}')
-        tx_bytes=$(echo $line | awk '{print $7}')
+        public_key=$(echo "$line" | awk '{print $2}')
+        # shellcheck disable=SC2034
+        endpoint=$(echo "$line" | awk '{print $3}')
+        allowed_ips=$(echo "$line" | awk '{print $4}')
+        handshake_seconds=$(echo "$line" | awk '{print $5}')
+        rx_bytes=$(echo "$line" | awk '{print $6}')
+        tx_bytes=$(echo "$line" | awk '{print $7}')
         
         # Получаем IP из allowed_ips (первый /32)
         peer_ip=$(echo "$allowed_ips" | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' | head -1)
@@ -164,7 +170,8 @@ collect_wg_data() {
         peer_name=""
         if [ -n "$peer_ip" ]; then
             # Ищем в /etc/wireguard/clients/*.conf
-            local client_conf=$(grep -l "$peer_ip" /etc/wireguard/clients/*.conf 2>/dev/null | head -1)
+            local client_conf
+            client_conf=$(grep -l "$peer_ip" /etc/wireguard/clients/*.conf 2>/dev/null | head -1)
             if [ -n "$client_conf" ]; then
                 peer_name=$(basename "$client_conf" .conf)
             fi
@@ -172,7 +179,8 @@ collect_wg_data() {
         
         # Если не нашли по IP, пробуем найти по публичному ключу
         if [ -z "$peer_name" ] && [ -n "$public_key" ]; then
-            local client_conf=$(grep -l "$public_key" /etc/wireguard/clients/*.conf 2>/dev/null | head -1)
+            local client_conf
+            client_conf=$(grep -l "$public_key" /etc/wireguard/clients/*.conf 2>/dev/null | head -1)
             if [ -n "$client_conf" ]; then
                 peer_name=$(basename "$client_conf" .conf)
             fi
@@ -206,7 +214,8 @@ execute_collect_rules() {
         if need_to_run "collect" "$interval" "$interval"; then
             log "INFO" "Выполнение сбора данных (интервал: ${interval}с)"
             
-            local start_time=$(date +%s)
+            local start_time
+            start_time=$(date +%s)
             
             # Сбор основного интерфейса
             if [ -n "$MAIN_IFACE" ]; then
@@ -218,7 +227,8 @@ execute_collect_rules() {
                 collect_wg_data "$WG_IFACE" "$timestamp"
             fi
             
-            local end_time=$(date +%s)
+            local end_time
+            end_time=$(date +%s)
             local duration=$((end_time - start_time))
             
             # Логируем выполнение
@@ -273,7 +283,8 @@ aggregate_interfaces_data() {
     local output_type="$2"
     local window="$3"
     local end_time="$4"
-    local start_time=$(date -d "$end_time - $window seconds" "+%Y-%m-%d %H:%M:%S")
+    local start_time
+    start_time=$(date -d "$end_time - $window seconds" "+%Y-%m-%d %H:%M:%S")
     
     log "DEBUG" "Агрегация $input_type -> $output_type за период $start_time - $end_time"
     
@@ -287,7 +298,8 @@ aggregate_interfaces_data() {
         fi
         
         # Получаем статистику
-        local stats=$(sqlite3 "$DB_PATH" <<EOF
+        local stats
+        stats=$(sqlite3 "$DB_PATH" <<EOF
 WITH data_window AS (
     SELECT 
         timestamp,
@@ -335,6 +347,7 @@ EOF
 )
         
         # Парсим результат
+        # shellcheck disable=SC2034
         IFS='|' read -r avg_rx avg_tx avg_rx_packets avg_tx_packets \
             total_rx_errors total_tx_errors total_rx_drop total_tx_drop \
             sample_count avg_rx_rate avg_tx_rate max_rx_rate max_tx_rate \
@@ -368,12 +381,14 @@ aggregate_wg_data() {
     local output_type="$2"
     local window="$3"
     local end_time="$4"
-    local start_time=$(date -d "$end_time - $window seconds" "+%Y-%m-%d %H:%M:%S")
+    local start_time
+    start_time=$(date -d "$end_time - $window seconds" "+%Y-%m-%d %H:%M:%S")
     
     log "DEBUG" "Агрегация WG $input_type -> $output_type за период $start_time - $end_time"
     
     # Получаем уникальных клиентов
-    local peers=$(sqlite3 "$DB_PATH" <<EOF
+    local peers
+    peers=$(sqlite3 "$DB_PATH" <<EOF
 SELECT DISTINCT peer_key, peer_name, peer_ip
 FROM wg_peers_stats
 WHERE data_type = '$input_type'
@@ -387,7 +402,8 @@ EOF
         fi
         
         # Получаем статистику по клиенту
-        local stats=$(sqlite3 "$DB_PATH" <<EOF
+        local stats
+        stats=$(sqlite3 "$DB_PATH" <<EOF
 WITH data_window AS (
     SELECT 
         timestamp,
@@ -425,6 +441,7 @@ EOF
 )
         
         # Парсим результат
+        # shellcheck disable=SC2034
         IFS='|' read -r avg_rx avg_tx avg_handshake sample_count \
             avg_rx_rate avg_tx_rate max_rx_rate max_tx_rate \
             min_rx_rate min_tx_rate <<< "$stats"
@@ -455,18 +472,24 @@ execute_aggregate_rules() {
     
     for rule in "${!AGGREGATE_RULES[@]}"; do
         # rule = "raw:300" (входной_тип:интервал_запуска)
-        local input_type=$(echo "$rule" | cut -d: -f1)
-        local run_interval=$(echo "$rule" | cut -d: -f2)
+        local input_type
+        input_type=$(echo "$rule" | cut -d: -f1)
+        local run_interval
+        run_interval=$(echo "$rule" | cut -d: -f2)
         local output_config="${AGGREGATE_RULES[$rule]}"  # "agg_5min:300:описание"
         
-        local output_type=$(echo "$output_config" | cut -d: -f1)
-        local window=$(echo "$output_config" | cut -d: -f2)
-        local description=$(echo "$output_config" | cut -d: -f3)
+        local output_type
+        output_type=$(echo "$output_config" | cut -d: -f1)
+        local window
+        window=$(echo "$output_config" | cut -d: -f2)
+        local description
+        description=$(echo "$output_config" | cut -d: -f3)
         
         if need_to_run "aggregate" "$rule" "$run_interval"; then
             log "INFO" "Выполнение агрегации: $description"
             
-            local start_agg=$(date +%s)
+            local start_agg
+            start_agg=$(date +%s)
             
             # Агрегация интерфейсов
             aggregate_interfaces_data "$input_type" "$output_type" "$window" "$timestamp"
@@ -476,8 +499,10 @@ execute_aggregate_rules() {
                 aggregate_wg_data "$input_type" "$output_type" "$window" "$timestamp"
             fi
             
-            local end_agg=$(date +%s)
-            local duration=$((end_agg - start_agg))
+            local end_agg
+            end_agg=$(date +%s)
+            local duration
+            duration=$((end_agg - start_agg))
             
             # Логируем выполнение
             sqlite3 "$DB_PATH" <<EOF
@@ -497,22 +522,26 @@ execute_cleanup_rules() {
     
     for data_type in "${!CLEANUP_RULES[@]}"; do
         local retention_days="${CLEANUP_RULES[$data_type]}"
-        local cutoff_date=$(date -d "$retention_days days ago" "+%Y-%m-%d %H:%M:%S")
+    local cutoff_date
+    cutoff_date=$(date -d "$retention_days days ago" "+%Y-%m-%d %H:%M:%S")
         
         # Проверяем, нужно ли запускать очистку (раз в час)
         if need_to_run "cleanup" "$data_type" "3600"; then
             log "INFO" "Очистка $data_type старше $retention_days дней (до $cutoff_date)"
             
             # Очистка interfaces_stats
-            local deleted_if=$(sqlite3 "$DB_PATH" "DELETE FROM interfaces_stats WHERE data_type = '$data_type' AND timestamp < '$cutoff_date'; SELECT changes();")
+            local deleted_if
+            deleted_if=$(sqlite3 "$DB_PATH" "DELETE FROM interfaces_stats WHERE data_type = '$data_type' AND timestamp < '$cutoff_date'; SELECT changes();")
             
             # Очистка wg_peers_stats
-            local deleted_wg=0
+            local deleted_wg
+            deleted_wg=0
             if [ -n "$WG_IFACE" ]; then
                 deleted_wg=$(sqlite3 "$DB_PATH" "DELETE FROM wg_peers_stats WHERE data_type = '$data_type' AND timestamp < '$cutoff_date'; SELECT changes();")
             fi
             
-            local total_deleted=$((deleted_if + deleted_wg))
+            local total_deleted
+            total_deleted=$((deleted_if + deleted_wg))
             
             # Логируем выполнение
             sqlite3 "$DB_PATH" <<EOF
@@ -542,7 +571,8 @@ main_loop() {
     trap cleanup SIGTERM SIGINT
     
     while true; do
-        local current_time=$(date "+%Y-%m-%d %H:%M:%S")
+    local current_time
+    current_time=$(date "+%Y-%m-%d %H:%M:%S")
         
         # Выполняем сбор данных
         execute_collect_rules "$current_time"
@@ -563,7 +593,8 @@ main() {
     # Проверяем, не запущен ли уже демон
     local pid_file="/var/run/nm-daemon.pid"
     if [ -f "$pid_file" ]; then
-        local old_pid=$(cat "$pid_file")
+    local old_pid
+    old_pid=$(cat "$pid_file")
         if kill -0 "$old_pid" 2>/dev/null; then
             log "ERROR" "Демон уже запущен (PID: $old_pid)"
             exit 1

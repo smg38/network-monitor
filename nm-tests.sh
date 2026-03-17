@@ -1,13 +1,14 @@
 #!/bin/bash
 # nm-tests.sh - Юнит-тесты Network Monitor
-# Версия: 1.3
+# Версия: 1.4
 # Автор: TG: @smg38 smg38@yandex.ru
 
 set -euo pipefail
 
 # Загружаем конфигурацию
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/nm-config" 2>/dev/null || { echo "❌ nm-config не найден"; exit 1; }
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/nm-config.sh" 2>/dev/null || { echo "❌ nm-config.sh не найден"; exit 1; }
 
 # Цвета
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -66,7 +67,7 @@ test_database() {
 test_scripts() {
     run_test "nm-daemon.sh исполняемый" "[ -x \"\$BASE_DIR/nm-daemon.sh\" ]"
     run_test "nm-monitor.sh исполняемый" "[ -x \"\$BASE_DIR/nm-monitor.sh\" ]"
-    run_test "nm-config в BASE_DIR" "[ -f \"\$BASE_DIR/nm-config\" ]"
+    run_test "nm-config.sh в BASE_DIR" "[ -f \"\$BASE_DIR/nm-config.sh\" ]"
 }
 
 # Тест 5: Systemd сервис

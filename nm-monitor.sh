@@ -1,6 +1,6 @@
 #!/bin/bash
 # nm-monitor.sh - Клиент для формирования отчетов и live-мониторинга
-# Версия: 1.3
+# Версия: 1.4
 # Автор: TG: @smg38 smg38@yandex.ru
 # Использование: ./nm-monitor.sh [--live|--summary|--daily|--weekly|--monthly|--top N|--period YYYY-MM-DD YYYY-MM-DD|--help]
 
@@ -8,13 +8,15 @@ set -euo pipefail
 
 # Загружаем конфигурацию
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/nm-config"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/nm-config.sh"
 
 # Функция логирования
 log() {
     local level="$1"
     local message="$2"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     
     if [ "$level" = "ERROR" ]; then
         echo >&2 "${timestamp} [${level}] ${message}"
@@ -25,8 +27,8 @@ log() {
 
 # Функция форматирования байт в человеко-читаемый вид
 format_bytes() {
-    local bytes=$1
-    local precision=2
+    local bytes precision=2
+    bytes="$1"
     
     if [ -z "$bytes" ] || [ "$bytes" -lt 0 ]; then
         echo "0 B"
@@ -56,8 +58,9 @@ format_speed() {
 draw_bar() {
     local percent=$1
     local width=50
-    local filled=$(echo "scale=0; $percent * $width / 100" | bc)
-    local empty=$((width - filled))
+    local filled empty
+    filled=$(echo "scale=0; $percent * $width / 100" | bc)
+    empty=$((width - filled))
     
     printf "["
     printf "%${filled}s" | tr ' ' '█'
@@ -68,33 +71,37 @@ draw_bar() {
 # Функция получения текущей скорости (дельты)
 get_current_rates() {
     local interface="$1"
-    local seconds=5  # смотрим последние 5 секунд
     
     # Получаем две последние записи
-    local data=$(sqlite3 "$DB_PATH" <<EOF
+    local data
+    data=$(sqlite3 "$DB_PATH" <<EOF
 SELECT timestamp, rx_bytes, tx_bytes FROM interfaces_stats 
 WHERE interface = '$interface' AND data_type = 'raw'
 ORDER BY timestamp DESC LIMIT 2;
 EOF
 )
     
-    if [ $(echo "$data" | wc -l) -lt 2 ]; then
+    if [ "$(echo "$data" | wc -l)" -lt 2 ]; then
         echo "0|0"
         return
     fi
     
-    local latest=$(echo "$data" | head -1)
-    local prev=$(echo "$data" | tail -1)
+    local latest prev
+    latest=$(echo "$data" | head -1)
+    prev=$(echo "$data" | tail -1)
     
-    local latest_time=$(echo "$latest" | cut -d'|' -f1)
-    local latest_rx=$(echo "$latest" | cut -d'|' -f2)
-    local latest_tx=$(echo "$latest" | cut -d'|' -f3)
+    local latest_time latest_rx latest_tx
+    latest_time=$(echo "$latest" | cut -d'|' -f1)
+    latest_rx=$(echo "$latest" | cut -d'|' -f2)
+    latest_tx=$(echo "$latest" | cut -d'|' -f3)
     
-    local prev_time=$(echo "$prev" | cut -d'|' -f1)
-    local prev_rx=$(echo "$prev" | cut -d'|' -f2)
-    local prev_tx=$(echo "$prev" | cut -d'|' -f3)
+    local prev_time prev_rx prev_tx
+    prev_time=$(echo "$prev" | cut -d'|' -f1)
+    prev_rx=$(echo "$prev" | cut -d'|' -f2)
+    prev_tx=$(echo "$prev" | cut -d'|' -f3)
     
-    local time_diff=$(($(date -d "$latest_time" +%s) - $(date -d "$prev_time" +%s)))
+    local time_diff
+    time_diff=$(($(date -d "$latest_time" +%s) - $(date -d "$prev_time" +%s)))
     
     if [ "$time_diff" -eq 0 ]; then
         echo "0|0"
@@ -119,13 +126,15 @@ live_mode() {
         tput sc
         
         # Получаем текущие скорости
-        local main_rates=$(get_current_rates "$MAIN_IFACE")
-        local main_rx_rate=$(echo "$main_rates" | cut -d'|' -f1)
-        local main_tx_rate=$(echo "$main_rates" | cut -d'|' -f2)
+    local main_rates main_rx_rate main_tx_rate
+    main_rates=$(get_current_rates "$MAIN_IFACE")
+    main_rx_rate=$(echo "$main_rates" | cut -d'|' -f1)
+    main_tx_rate=$(echo "$main_rates" | cut -d'|' -f2)
         
         # Получаем статистику за сегодня
-        local today=$(date "+%Y-%m-%d")
-        local main_today=$(sqlite3 "$DB_PATH" <<EOF
+    local today main_today main_today_rx main_today_tx
+    today=$(date "+%Y-%m-%d")
+    main_today=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     SUM(rx_bytes) as total_rx,
     SUM(tx_bytes) as total_tx
@@ -135,8 +144,8 @@ WHERE interface = '$MAIN_IFACE'
     AND date(timestamp) = '$today';
 EOF
 )
-        local main_today_rx=$(echo "$main_today" | cut -d'|' -f1)
-        local main_today_tx=$(echo "$main_today" | cut -d'|' -f2)
+    main_today_rx=$(echo "$main_today" | cut -d'|' -f1)
+    main_today_tx=$(echo "$main_today" | cut -d'|' -f2)
         
         # Заголовок
         echo "${BOLD}${BLUE}┌─────────────────────────────────────────────────────────────┐${NC}"
@@ -144,20 +153,19 @@ EOF
         echo "${BOLD}${BLUE}├─────────────────────────────────────────────────────────────┤${NC}"
         
         # Основной интерфейс
-        printf "${BOLD}${BLUE}│${NC}  ${GREEN}%-15s${NC}: ↓ %10s  ↑ %10s  (сегодня: %s / %s) ${BLUE}│${NC}\n" \
-            "$MAIN_IFACE" \
-            "$(format_speed $main_rx_rate)" \
-            "$(format_speed $main_tx_rate)" \
-            "$(format_bytes $main_today_rx)" \
-            "$(format_bytes $main_today_tx)"
+        printf "${BOLD}${BLUE}│${NC}  ${GREEN}%-15s${NC}: ↓ %10s  ↑ %10s  (сегодня: %s / %s) ${BLUE}│${NC}\n" "$MAIN_IFACE" "$(format_speed "$main_rx_rate")" "$(format_speed "$main_tx_rate")" "$(format_bytes "$main_today_rx")" "$(format_bytes "$main_today_tx")"
         
         # WireGuard интерфейс (если есть)
         if [ -n "$WG_IFACE" ]; then
-            local wg_rates=$(get_current_rates "$WG_IFACE")
-            local wg_rx_rate=$(echo "$wg_rates" | cut -d'|' -f1)
-            local wg_tx_rate=$(echo "$wg_rates" | cut -d'|' -f2)
+            local wg_rates
+            wg_rates=$(get_current_rates "$WG_IFACE")
+            local wg_rx_rate
+            wg_rx_rate=$(echo "$wg_rates" | cut -d'|' -f1)
+            local wg_tx_rate
+            wg_tx_rate=$(echo "$wg_rates" | cut -d'|' -f2)
             
-            local wg_today=$(sqlite3 "$DB_PATH" <<EOF
+            local wg_today
+            wg_today=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     SUM(rx_bytes) as total_rx,
     SUM(tx_bytes) as total_tx
@@ -167,22 +175,20 @@ WHERE interface = '$WG_IFACE'
     AND date(timestamp) = '$today';
 EOF
 )
-            local wg_today_rx=$(echo "$wg_today" | cut -d'|' -f1)
-            local wg_today_tx=$(echo "$wg_today" | cut -d'|' -f2)
+            local wg_today_rx
+            wg_today_rx=$(echo "$wg_today" | cut -d'|' -f1)
+            local wg_today_tx
+            wg_today_tx=$(echo "$wg_today" | cut -d'|' -f2)
             
-            printf "${BOLD}${BLUE}│${NC}  ${GREEN}%-15s${NC}: ↓ %10s  ↑ %10s  (сегодня: %s / %s) ${BLUE}│${NC}\n" \
-                "$WG_IFACE" \
-                "$(format_speed $wg_rx_rate)" \
-                "$(format_speed $wg_tx_rate)" \
-                "$(format_bytes $wg_today_rx)" \
-                "$(format_bytes $wg_today_tx)"
+            printf "${BOLD}${BLUE}│${NC}  ${GREEN}%-15s${NC}: ↓ %10s  ↑ %10s  (сегодня: %s / %s) ${BLUE}│${NC}\n" "$WG_IFACE" "$(format_speed "$wg_rx_rate")" "$(format_speed "$wg_tx_rate")" "$(format_bytes "$wg_today_rx")" "$(format_bytes "$wg_today_tx")"
         fi
         
         echo "${BOLD}${BLUE}├─────────────────────────────────────────────────────────────┤${NC}"
         echo "${BOLD}${BLUE}│${NC}  ${YELLOW}АКТИВНЫЕ КЛИЕНТЫ WG0:${NC}                                         ${BLUE}│${NC}"
         
         # Получаем активных клиентов (последние 5 минут)
-        local active_peers=$(sqlite3 "$DB_PATH" <<EOF
+        local active_peers
+        active_peers=$(sqlite3 "$DB_PATH" <<EOF
 WITH last_peer_data AS (
     SELECT 
         peer_name,
@@ -211,17 +217,12 @@ EOF
         if [ -n "$active_peers" ]; then
             echo "$active_peers" | while IFS='|' read -r name ip rx tx last_seen; do
                 # Вычисляем скорость (грубо)
-                local time_ago=$(($(date +%s) - $(date -d "$last_seen" +%s)))
+                local time_ago
+                time_ago=$(($(date +%s) - $(date -d "$last_seen" +%s)))
                 if [ "$time_ago" -lt 60 ]; then
                     local rx_rate=0
                     local tx_rate=0
-                    printf "${BOLD}${BLUE}│${NC}  ${CYAN}%-15s${NC} %-15s ↓ %8s  ↑ %8s  (total: %s/%s) ${BLUE}│${NC}\n" \
-                        "$name" \
-                        "$ip" \
-                        "$(format_speed $rx_rate)" \
-                        "$(format_speed $tx_rate)" \
-                        "$(format_bytes $rx)" \
-                        "$(format_bytes $tx)"
+                    printf "${BOLD}${BLUE}│${NC}  ${CYAN}%-15s${NC} %-15s ↓ %8s  ↑ %8s  (total: %s/%s) ${BLUE}│${NC}\n" "$name" "$ip" "$(format_speed "$rx_rate")" "$(format_speed "$tx_rate")" "$(format_bytes "$rx")" "$(format_bytes "$tx")"
                 fi
             done
         else
@@ -231,7 +232,8 @@ EOF
         echo "${BOLD}${BLUE}├─────────────────────────────────────────────────────────────┤${NC}"
         
         # Пиковые нагрузки за сегодня
-        local peaks=$(sqlite3 "$DB_PATH" <<EOF
+        local peaks
+        peaks=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     MAX(max_rx_rate) as peak_rx,
     MAX(max_tx_rate) as peak_tx
@@ -241,12 +243,12 @@ WHERE interface = '$MAIN_IFACE'
     AND date(timestamp) = '$today';
 EOF
 )
-        local peak_rx=$(echo "$peaks" | cut -d'|' -f1)
-        local peak_tx=$(echo "$peaks" | cut -d'|' -f2)
+        local peak_rx
+        peak_rx=$(echo "$peaks" | cut -d'|' -f1)
+        local peak_tx
+        peak_tx=$(echo "$peaks" | cut -d'|' -f2)
         
-        printf "${BOLD}${BLUE}│${NC}  Пик сегодня: ↓ %10s  ↑ %10s                 ${BLUE}│${NC}\n" \
-            "$(format_speed $peak_rx)" \
-            "$(format_speed $peak_tx)"
+        printf "${BOLD}${BLUE}│${NC}  Пик сегодня: ↓ %10s  ↑ %10s                 ${BLUE}│${NC}\n" "$(format_speed "$peak_rx")" "$(format_speed "$peak_tx")"
         
         echo "${BOLD}${BLUE}└─────────────────────────────────────────────────────────────┘${NC}"
         echo " Нажмите Ctrl+C для выхода"
@@ -260,14 +262,16 @@ EOF
 
 # Функция сводки за сегодня
 summary_mode() {
-    local today=$(date "+%Y-%m-%d")
+    local today
+    today=$(date "+%Y-%m-%d")
     
     echo "${BOLD}${BLUE}СВОДКА ЗА $(date '+%d.%m.%Y')${NC}"
     echo "═══════════════════════════════════════════════════════════════"
     echo
     
     # Статистика по основному интерфейсу
-    local main_stats=$(sqlite3 "$DB_PATH" <<EOF
+    local main_stats
+    main_stats=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     SUM(rx_bytes) as total_rx,
     SUM(tx_bytes) as total_tx,
@@ -286,14 +290,15 @@ EOF
     
     echo "${BOLD}ИНТЕРФЕЙС $MAIN_IFACE${NC}"
     echo "───────────────────────────────────────────────────────────────"
-    printf "  Всего за день:  ↓ %s  ↑ %s\n" "$(format_bytes $total_rx)" "$(format_bytes $total_tx)"
-    printf "  Средняя нагрузка: ↓ %s  ↑ %s\n" "$(format_speed ${avg_rx_rate:-0})" "$(format_speed ${avg_tx_rate:-0})"
-    printf "  Пиковая нагрузка: ↓ %s  ↑ %s\n" "$(format_speed ${peak_rx:-0})" "$(format_speed ${peak_tx:-0})"
+    printf "  Всего за день:  ↓ %s  ↑ %s\n" "$(format_bytes "$total_rx")" "$(format_bytes "$total_tx")"
+    printf "  Средняя нагрузка: ↓ %s  ↑ %s\n" "$(format_speed "${avg_rx_rate:-0}")" "$(format_speed "${avg_tx_rate:-0}")"
+    printf "  Пиковая нагрузка: ↓ %s  ↑ %s\n" "$(format_speed "${peak_rx:-0}")" "$(format_speed "${peak_tx:-0}")"
     echo
     
     # Статистика по WireGuard (если есть)
     if [ -n "$WG_IFACE" ]; then
-        local wg_stats=$(sqlite3 "$DB_PATH" <<EOF
+        local wg_stats
+        wg_stats=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     SUM(rx_bytes) as total_rx,
     SUM(tx_bytes) as total_tx
@@ -307,7 +312,7 @@ EOF
         
         echo "${BOLD}ИНТЕРФЕЙС $WG_IFACE (WireGuard)${NC}"
         echo "───────────────────────────────────────────────────────────────"
-        printf "  Всего за день:  ↓ %s  ↑ %s\n" "$(format_bytes $wg_total_rx)" "$(format_bytes $wg_total_tx)"
+        printf "  Всего за день:  ↓ %s  ↑ %s\n" "$(format_bytes "$wg_total_rx")" "$(format_bytes "$wg_total_tx")"
         echo
     fi
     
@@ -315,7 +320,8 @@ EOF
     echo "${BOLD}ТОП-${TOP_PEERS_DEFAULT} КЛИЕНТОВ ЗА СЕГОДНЯ${NC}"
     echo "───────────────────────────────────────────────────────────────"
     
-    local peers=$(sqlite3 "$DB_PATH" <<EOF
+    local peers
+    peers=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     peer_name,
     peer_ip,
@@ -335,12 +341,7 @@ EOF
         echo "  ───────────────────────────────────────────────────────────"
         local i=1
         echo "$peers" | while IFS='|' read -r name ip rx tx; do
-            printf "  %-3d %-15s %-15s %12s %12s\n" \
-                "$i" \
-                "${name:0:15}" \
-                "${ip:-N/A}" \
-                "$(format_bytes $rx)" \
-                "$(format_bytes $tx)"
+            printf "  %-3d %-15s %-15s %12s %12s\n" "$i" "${name:0:15}" "${ip:-N/A}" "$(format_bytes "$rx")" "$(format_bytes "$tx")"
             i=$((i+1))
         done
     else
@@ -366,7 +367,8 @@ daily_mode() {
         local start_time="${date} ${hour}:00:00"
         local end_time="${date} ${hour}:59:59"
         
-        local hour_stats=$(sqlite3 "$DB_PATH" <<EOF
+        local hour_stats
+        hour_stats=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     SUM(rx_bytes) as hour_rx,
     SUM(tx_bytes) as hour_tx,
@@ -381,12 +383,7 @@ EOF
         IFS='|' read -r hour_rx hour_tx avg_rx avg_tx <<< "$hour_stats"
         
         if [ -n "$hour_rx" ] && [ "$hour_rx" -gt 0 ] 2>/dev/null; then
-            printf "  %02d:00  %12s %12s %12s %12s\n" \
-                "$hour" \
-                "$(format_bytes $hour_rx)" \
-                "$(format_bytes $hour_tx)" \
-                "$(format_speed ${avg_rx:-0})" \
-                "$(format_speed ${avg_tx:-0})"
+            printf "  %02d:00  %12s %12s %12s %12s\n" "$hour" "$(format_bytes "$hour_rx")" "$(format_bytes "$hour_tx")" "$(format_speed "${avg_rx:-0}")" "$(format_speed "${avg_tx:-0}")"
         fi
     done
     echo
@@ -395,7 +392,8 @@ EOF
     echo "${BOLD}ТОП-${TOP_PEERS_DEFAULT} КЛИЕНТОВ${NC}"
     echo "───────────────────────────────────────────────────────────────"
     
-    local peers=$(sqlite3 "$DB_PATH" <<EOF
+    local peers
+    peers=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     peer_name,
     peer_ip,
@@ -415,12 +413,7 @@ EOF
         echo "  ───────────────────────────────────────────────────────────"
         local i=1
         echo "$peers" | while IFS='|' read -r name ip rx tx; do
-            printf "  %-3d %-15s %-15s %12s %12s\n" \
-                "$i" \
-                "${name:0:15}" \
-                "${ip:-N/A}" \
-                "$(format_bytes $rx)" \
-                "$(format_bytes $tx)"
+            printf "  %-3d %-15s %-15s %12s %12s\n" "$i" "${name:0:15}" "${ip:-N/A}" "$(format_bytes "$rx")" "$(format_bytes "$tx")"
             i=$((i+1))
         done
     else
@@ -431,7 +424,8 @@ EOF
 # Функция недельного отчета
 weekly_mode() {
     local end_date="${1:-$(date '+%Y-%m-%d')}"
-    local start_date=$(date -d "$end_date - 6 days" '+%Y-%m-%d')
+    local start_date
+    start_date=$(date -d "$end_date - 6 days" '+%Y-%m-%d')
     
     echo "${BOLD}${BLUE}ОТЧЕТ ЗА ПЕРИОД $start_date - $end_date${NC}"
     echo "═══════════════════════════════════════════════════════════════"
@@ -444,9 +438,11 @@ weekly_mode() {
     echo "  ─────────────────────────────────────────────────────────────"
     
     for i in {0..6}; do
-        local day=$(date -d "$start_date + $i days" '+%Y-%m-%d')
+        local day
+        day=$(date -d "$start_date + $i days" '+%Y-%m-%d')
         
-        local day_stats=$(sqlite3 "$DB_PATH" <<EOF
+        local day_stats
+        day_stats=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     SUM(rx_bytes) as day_rx,
     SUM(tx_bytes) as day_tx,
@@ -461,12 +457,7 @@ EOF
         IFS='|' read -r day_rx day_tx peak_rx peak_tx <<< "$day_stats"
         
         if [ -n "$day_rx" ] && [ "$day_rx" -gt 0 ] 2>/dev/null; then
-            printf "  %-10s %12s %12s %12s %12s\n" \
-                "$day" \
-                "$(format_bytes $day_rx)" \
-                "$(format_bytes $day_tx)" \
-                "$(format_speed ${peak_rx:-0})" \
-                "$(format_speed ${peak_tx:-0})"
+            printf "  %-10s %12s %12s %12s %12s\n" "$day" "$(format_bytes "$day_rx")" "$(format_bytes "$day_tx")" "$(format_speed "${peak_rx:-0}")" "$(format_speed "${peak_tx:-0}")"
         fi
     done
     echo
@@ -475,7 +466,8 @@ EOF
     echo "${BOLD}ТОП-${TOP_PEERS_DEFAULT} КЛИЕНТОВ ЗА НЕДЕЛЮ${NC}"
     echo "───────────────────────────────────────────────────────────────"
     
-    local peers=$(sqlite3 "$DB_PATH" <<EOF
+    local peers
+    peers=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     peer_name,
     peer_ip,
@@ -495,12 +487,7 @@ EOF
         echo "  ───────────────────────────────────────────────────────────"
         local i=1
         echo "$peers" | while IFS='|' read -r name ip rx tx; do
-            printf "  %-3d %-15s %-15s %12s %12s\n" \
-                "$i" \
-                "${name:0:15}" \
-                "${ip:-N/A}" \
-                "$(format_bytes $rx)" \
-                "$(format_bytes $tx)"
+            printf "  %-3d %-15s %-15s %12s %12s\n" "$i" "${name:0:15}" "${ip:-N/A}" "$(format_bytes "$rx")" "$(format_bytes "$tx")"
             i=$((i+1))
         done
     else
@@ -511,14 +498,16 @@ EOF
 # Функция месячного отчета
 monthly_mode() {
     local end_date="${1:-$(date '+%Y-%m-%d')}"
-    local start_date=$(date -d "$end_date - 29 days" '+%Y-%m-%d')
+    local start_date
+    start_date=$(date -d "$end_date - 29 days" '+%Y-%m-%d')
     
     echo "${BOLD}${BLUE}ОТЧЕТ ЗА ПЕРИОД $start_date - $end_date${NC}"
     echo "═══════════════════════════════════════════════════════════════"
     echo
     
     # Суммарная статистика
-    local total_stats=$(sqlite3 "$DB_PATH" <<EOF
+    local total_stats
+    total_stats=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     SUM(rx_bytes) as total_rx,
     SUM(tx_bytes) as total_tx,
@@ -534,18 +523,17 @@ EOF
     
     echo "${BOLD}ВСЕГО ЗА МЕСЯЦ${NC}"
     echo "───────────────────────────────────────────────────────────────"
-    printf "  Получено:  %s\n" "$(format_bytes $total_rx)"
-    printf "  Отправлено: %s\n" "$(format_bytes $total_tx)"
-    printf "  Среднесуточная нагрузка: ↓ %s  ↑ %s\n" \
-        "$(format_speed ${avg_daily_rx:-0})" \
-        "$(format_speed ${avg_daily_tx:-0})"
+    printf "  Получено:  %s\n" "$(format_bytes "$total_rx")"
+    printf "  Отправлено: %s\n" "$(format_bytes "$total_tx")"
+    printf "  Среднесуточная нагрузка: ↓ %s  ↑ %s\n" "$(format_speed "${avg_daily_rx:-0}")" "$(format_speed "${avg_daily_tx:-0}")"
     echo
     
     # Топ клиентов за месяц
     echo "${BOLD}ТОП-${TOP_PEERS_DEFAULT} КЛИЕНТОВ ЗА МЕСЯЦ${NC}"
     echo "───────────────────────────────────────────────────────────────"
     
-    local peers=$(sqlite3 "$DB_PATH" <<EOF
+    local peers
+    peers=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     peer_name,
     peer_ip,
@@ -565,12 +553,7 @@ EOF
         echo "  ───────────────────────────────────────────────────────────"
         local i=1
         echo "$peers" | while IFS='|' read -r name ip rx tx; do
-            printf "  %-3d %-15s %-15s %12s %12s\n" \
-                "$i" \
-                "${name:0:15}" \
-                "${ip:-N/A}" \
-                "$(format_bytes $rx)" \
-                "$(format_bytes $tx)"
+            printf "  %-3d %-15s %-15s %12s %12s\n" "$i" "${name:0:15}" "${ip:-N/A}" "$(format_bytes "$rx")" "$(format_bytes "$tx")"
             i=$((i+1))
         done
     else
@@ -593,7 +576,8 @@ period_mode() {
     echo
     
     # Суммарная статистика
-    local total_stats=$(sqlite3 "$DB_PATH" <<EOF
+    local total_stats
+    total_stats=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     SUM(rx_bytes) as total_rx,
     SUM(tx_bytes) as total_tx,
@@ -608,18 +592,17 @@ EOF
     
     echo "${BOLD}ВСЕГО ЗА ПЕРИОД (${days} дней)${NC}"
     echo "───────────────────────────────────────────────────────────────"
-    printf "  Получено:  %s\n" "$(format_bytes $total_rx)"
-    printf "  Отправлено: %s\n" "$(format_bytes $total_tx)"
-    printf "  В среднем в день: ↓ %s  ↑ %s\n" \
-        "$(format_bytes $((total_rx / days)))" \
-        "$(format_bytes $((total_tx / days)))"
+    printf "  Получено:  %s\n" "$(format_bytes "$total_rx")"
+    printf "  Отправлено: %s\n" "$(format_bytes "$total_tx")"
+    printf "  В среднем в день: ↓ %s  ↑ %s\n" "$(format_bytes "$((total_rx / days))")" "$(format_bytes "$((total_tx / days))")"
     echo
     
     # Топ клиентов за период
     echo "${BOLD}ТОП-${TOP_PEERS_DEFAULT} КЛИЕНТОВ${NC}"
     echo "───────────────────────────────────────────────────────────────"
     
-    local peers=$(sqlite3 "$DB_PATH" <<EOF
+    local peers
+    peers=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     peer_name,
     peer_ip,
@@ -639,12 +622,7 @@ EOF
         echo "  ───────────────────────────────────────────────────────────"
         local i=1
         echo "$peers" | while IFS='|' read -r name ip rx tx; do
-            printf "  %-3d %-15s %-15s %12s %12s\n" \
-                "$i" \
-                "${name:0:15}" \
-                "${ip:-N/A}" \
-                "$(format_bytes $rx)" \
-                "$(format_bytes $tx)"
+            printf "  %-3d %-15s %-15s %12s %12s\n" "$i" "${name:0:15}" "${ip:-N/A}" "$(format_bytes "$rx")" "$(format_bytes "$tx")"
             i=$((i+1))
         done
     else
@@ -659,23 +637,30 @@ top_mode() {
     
     case "$period" in
         day)
-            local start_date=$(date '+%Y-%m-%d')
-            local end_date=$(date '+%Y-%m-%d')
+            local start_date
+            start_date=$(date '+%Y-%m-%d')
+            local end_date
+            end_date=$(date '+%Y-%m-%d')
             local period_text="сегодня"
             ;;
         week)
-            local start_date=$(date -d "7 days ago" '+%Y-%m-%d')
-            local end_date=$(date '+%Y-%m-%d')
+            local start_date
+            start_date=$(date -d "7 days ago" '+%Y-%m-%d')
+            local end_date
+            end_date=$(date '+%Y-%m-%d')
             local period_text="последние 7 дней"
             ;;
         month)
-            local start_date=$(date -d "30 days ago" '+%Y-%m-%d')
-            local end_date=$(date '+%Y-%m-%d')
+            local start_date
+            start_date=$(date -d "30 days ago" '+%Y-%m-%d')
+            local end_date
+            end_date=$(date '+%Y-%m-%d')
             local period_text="последние 30 дней"
             ;;
         *)
             local start_date="1970-01-01"
-            local end_date=$(date '+%Y-%m-%d')
+            local end_date
+            end_date=$(date '+%Y-%m-%d')
             local period_text="все время"
             ;;
     esac
@@ -683,7 +668,8 @@ top_mode() {
     echo "${BOLD}${BLUE}ТОП-${limit} КЛИЕНТОВ ЗА ${period_text^^}${NC}"
     echo "═══════════════════════════════════════════════════════════════"
     
-    local peers=$(sqlite3 "$DB_PATH" <<EOF
+    local peers
+    peers=$(sqlite3 "$DB_PATH" <<EOF
 SELECT 
     peer_name,
     peer_ip,
@@ -704,13 +690,7 @@ EOF
         echo "  ───────────────────────────────────────────────────────────────────"
         local i=1
         echo "$peers" | while IFS='|' read -r name ip rx tx days; do
-            printf "  %-3d %-15s %-15s %12s %12s %8d\n" \
-                "$i" \
-                "${name:0:15}" \
-                "${ip:-N/A}" \
-                "$(format_bytes $rx)" \
-                "$(format_bytes $tx)" \
-                "$days"
+            printf "  %-3d %-15s %-15s %12s %12s %8d\n" "$i" "${name:0:15}" "${ip:-N/A}" "$(format_bytes "$rx")" "$(format_bytes "$tx")" "$days"
             i=$((i+1))
         done
     else
@@ -731,9 +711,12 @@ status_mode() {
     fi
     
     # Информация о БД
-    local db_size=$(du -h "$DB_PATH" | cut -f1)
-    local db_records=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM interfaces_stats;")
-    local wg_records=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM wg_peers_stats;")
+    local db_size
+    db_size=$(du -h "$DB_PATH" | cut -f1)
+    local db_records
+    db_records=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM interfaces_stats;")
+    local wg_records
+    wg_records=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM wg_peers_stats;")
     
     echo "  База данных: $DB_PATH"
     echo "  Размер БД: $db_size"

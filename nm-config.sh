@@ -1,37 +1,39 @@
 #!/bin/bash
 # nm-config - Конфигурационный файл системы мониторинга сети
-# Версия: 1.3
+# Версия: 1.4
 # Автор: TG: @smg38 smg38@yandex.ru
-# Расположение: /etc/network-monitor/nm-config
+# Расположение: /etc/network-monitor/nm-config.sh
 
 # Цвета для вывода (если терминал поддерживает)
 setup_colors() {
     if [ -t 1 ]; then
-        RED='\033[0;31m'
-        GREEN='\033[0;32m'
-        YELLOW='\033[0;33m'
-        BLUE='\033[0;34m'
-        MAGENTA='\033[0;35m'
-        CYAN='\033[0;36m'
-        WHITE='\033[0;37m'
-        BOLD='\033[1m'
-        NC='\033[0m' # No Color
+        local RED='\033[0;31m'
+        local GREEN='\033[0;32m'
+        local YELLOW='\033[0;33m'
+        local BLUE='\033[0;34m'
+        local MAGENTA='\033[0;35m'
+        local CYAN='\033[0;36m'
+        local WHITE='\033[0;37m'
+        local BOLD='\033[1m'
+        local NC='\033[0m' # No Color
+        export RED GREEN YELLOW BLUE MAGENTA CYAN WHITE BOLD NC
     else
-        RED=''; GREEN=''; YELLOW=''; BLUE=''; MAGENTA=''; CYAN=''; WHITE=''; BOLD=''; NC=''
+        unset RED GREEN YELLOW BLUE MAGENTA CYAN WHITE BOLD NC
+        export RED GREEN YELLOW BLUE MAGENTA CYAN WHITE BOLD NC
     fi
 }
 
 # --- ОСНОВНЫЕ ИНТЕРФЕЙСЫ ---
 # Выбираются при установке, можно изменить вручную
-MAIN_IFACE="ens3"                    # Основной интерфейс для мониторинга
-WG_IFACE="wg0"                       # WireGuard интерфейс (пусто, если нет)
+export MAIN_IFACE="ens3"             # Основной интерфейс для мониторинга
+export WG_IFACE="wg0"                # WireGuard интерфейс (пусто, если нет)
 
 # --- ДИРЕКТОРИИ ---
-BASE_DIR="/opt/network-monitor"
-DB_PATH="${BASE_DIR}/nm-data.db"
-CONFIG_PATH="${BASE_DIR}/nm-config"
-LOG_DIR="/var/log/network-monitor"
-LOG_FILE="${LOG_DIR}/nm-daemon.log"
+export BASE_DIR="/opt/network-monitor"
+export DB_PATH="${BASE_DIR}/nm-data.db"
+export CONFIG_PATH="${BASE_DIR}/nm-config.sh"
+export LOG_DIR="/var/log/network-monitor"
+export LOG_FILE="${LOG_DIR}/nm-daemon.log"
 
 # --- ПРАВИЛА СБОРА ДАННЫХ (RAW DATA) ---
 # Формат: COLLECT_RULES[интервал_в_секундах]="описание"
@@ -40,6 +42,7 @@ declare -A COLLECT_RULES=(
     ["5"]="Сбор сырых данных каждые 5 секунд (максимальная детализация)"
     ["60"]="Сбор сырых данных каждую минуту (для долгосрочного хранения)"
 )
+export COLLECT_RULES
 
 # --- ПРАВИЛА АГРЕГАЦИИ ---
 # Формат: AGGREGATE_RULES[входной_тип:интервал_запуска]="выходной_тип:окно_агрегации:описание"
@@ -53,6 +56,7 @@ declare -A AGGREGATE_RULES=(
     ["agg_5min:3600"]="agg_hour_from_5min:3600:Агрегация за час из 5-минутных данных (каждый час)"
     ["agg_hour:86400"]="agg_day:86400:Агрегация за сутки из часовых данных (раз в день)"
 )
+export AGGREGATE_RULES
 
 # --- ПРАВИЛА ОЧИСТКИ ---
 # Формат: CLEANUP_RULES[тип_данных]="срок_хранения_в_днях"
@@ -63,15 +67,16 @@ declare -A CLEANUP_RULES=(
     ["agg_hour_from_5min"]="90"  # Часовые из 5-минутных - 90 дней
     ["agg_day"]="365"        # Дневные агрегаты - год
 )
+export CLEANUP_RULES
 
 # --- ИНТЕРВАЛЫ ПРОВЕРКИ (в секундах) ---
-CHECK_INTERVAL=10              # Как часто демон проверяет необходимость выполнения задач
+export CHECK_INTERVAL=10       # Как часто демон проверяет необходимость выполнения задач
 
 # --- НАСТРОЙКИ ЛОГИРОВАНИЯ ---
-LOG_LEVEL="INFO"               # DEBUG, INFO, WARN, ERROR
-LOG_MAX_SIZE="100"             # Максимальный размер лога в MB перед ротацией
-LOG_MAX_FILES="5"              # Количество хранимых файлов лога при ротации
+export LOG_LEVEL="INFO"        # DEBUG, INFO, WARN, ERROR
+export LOG_MAX_SIZE="100"      # Максимальный размер лога в MB перед ротацией
+export LOG_MAX_FILES="5"       # Количество хранимых файлов лога при ротации
 
 # --- ПАРАМЕТРЫ ОТЧЕТОВ ---
-TOP_PEERS_DEFAULT=10           # Количество клиентов в топ-отчетах по умолчанию
-LIVE_REFRESH_INTERVAL=2        # Интервал обновления live-режима (секунды)
+export TOP_PEERS_DEFAULT=10    # Количество клиентов в топ-отчетах по умолчанию
+export LIVE_REFRESH_INTERVAL=2 # Интервал обновления live-режима (секунды)
