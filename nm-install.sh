@@ -2,9 +2,12 @@
 # nm-install.sh - Установщик системы мониторинга сети  
 # Версия: 1.4
 # Автор: TG: @smg38 smg38@yandex.ru
-# Запуск: sudo ./nm-install.sh
+# Запуск: ./nm-install.sh (от root, sudo НЕ нужен)
 
 set -e  # Выход при ошибке
+
+# Определяем директорию скрипта
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Загружаем конфигурацию
 # shellcheck disable=SC1091
@@ -166,12 +169,12 @@ create_directories() {
     log "INFO" "Создание структуры директорий..."
     
     # Основная директория
-    sudo mkdir -p "$BASE_DIR"
-    sudo chmod 755 "$BASE_DIR"
+    mkdir -p "$BASE_DIR"
+    chmod 755 "$BASE_DIR"
     
     # Директория для логов  
-    sudo mkdir -p "$LOG_DIR"
-    sudo chmod 755 "$LOG_DIR"
+    mkdir -p "$LOG_DIR"
+    chmod 755 "$LOG_DIR"
     
     # Директория для клиентских конфигов WireGuard (если нужно)
     #mkdir -p /etc/wireguard/clients
@@ -304,7 +307,7 @@ INSERT INTO config (key, value) VALUES ('install_date', datetime('now'));
 INSERT INTO config (key, value) VALUES ('version', '1.4');
 EOF
 
-    sudo chmod 644 "$DB_PATH"
+    chmod 644 "$DB_PATH"
     log "INFO" "База данных создана: $DB_PATH"
 }
 
@@ -314,7 +317,7 @@ create_systemd_service() {
     
     local service_file="/etc/systemd/system/nm-daemon.service"
     
-    sudo tee "$service_file" <<EOF
+    tee "$service_file" <<EOF
 [Unit]
 Description=Network Monitor Daemon
 After=network.target network-online.target wg-quick@%i.service
@@ -357,16 +360,16 @@ copy_scripts() {
     log "INFO" "Копирование скриптов в $BASE_DIR..."
     
     # Копируем основной скрипт
-    sudo cp nm-monitor.sh "$BASE_DIR/"
-    sudo chmod 755 "$BASE_DIR/nm-monitor.sh"
+    cp nm-monitor.sh "$BASE_DIR/"
+    chmod 755 "$BASE_DIR/nm-monitor.sh"
     
     # Копируем демон
-    sudo cp nm-daemon.sh "$BASE_DIR/"
-    sudo chmod 755 "$BASE_DIR/nm-daemon.sh"
+    cp nm-daemon.sh "$BASE_DIR/"
+    chmod 755 "$BASE_DIR/nm-daemon.sh"
     
     # Копируем конфиг
-    sudo cp nm-config.sh "$BASE_DIR/"
-    sudo chmod 644 "$BASE_DIR/nm-config.sh"
+    cp nm-config.sh "$BASE_DIR/"
+    chmod 644 "$BASE_DIR/nm-config.sh"
     
     log "INFO" "Скрипты скопированы"
 }
@@ -406,17 +409,17 @@ uninstall_system() {
     setup_colors
     
     log "INFO" "Остановка сервиса..."
-    sudo systemctl stop nm-daemon.service 2>/dev/null || true
-    sudo systemctl disable nm-daemon.service 2>/dev/null || true
+    systemctl stop nm-daemon.service 2>/dev/null || true
+    systemctl disable nm-daemon.service 2>/dev/null || true
     
     log "INFO" "Удаление systemd сервиса..."
-    sudo rm -f /etc/systemd/system/nm-daemon.service
-    sudo systemctl daemon-reload
+    rm -f /etc/systemd/system/nm-daemon.service
+    systemctl daemon-reload
     
     log "INFO" "Удаление файлов..."
-    sudo rm -rf "$BASE_DIR"
-    sudo rm -rf "$LOG_DIR"
-    sudo rm -f /etc/logrotate.d/network-monitor
+    rm -rf "$BASE_DIR"
+    rm -rf "$LOG_DIR"
+    rm -f /etc/logrotate.d/network-monitor
     
     log "INFO" "Удаление завершено успешно!"
     echo -e "\n${GREEN}${BOLD}Система мониторинга сети успешно удалена!${NC}"
@@ -436,11 +439,11 @@ update_system() {
     fi
     
     log "INFO" "Остановка сервиса..."
-    sudo systemctl stop nm-daemon.service 2>/dev/null || true
+    systemctl stop nm-daemon.service 2>/dev/null || true
     
     log "INFO" "Создание резервной копии базы данных..."
     if [ -f "$DB_PATH" ]; then
-        sudo cp "$DB_PATH" "${DB_PATH}.backup.$(date +%Y%m%d_%H%M%S)"
+        cp "$DB_PATH" "${DB_PATH}.backup.$(date +%Y%m%d_%H%M%S)"
     fi
     
     log "INFO" "Обновление скриптов..."
@@ -453,8 +456,8 @@ update_system() {
     fi
     
     log "INFO" "Перезапуск сервиса..."
-    sudo systemctl daemon-reload
-    sudo systemctl start nm-daemon.service
+    systemctl daemon-reload
+    systemctl start nm-daemon.service
     
     log "INFO" "Обновление завершено успешно!"
     echo -e "\n${GREEN}${BOLD}Система мониторинга сети успешно обновлена до версии 1.4!${NC}"
@@ -501,6 +504,10 @@ main() {
         "install")
             echo -e "${BOLD}${BLUE}Установка системы мониторинга сети v1.4${NC}\n"
             
+            # Создаем директорию для логов сразу после проверки root
+            mkdir -p "$LOG_DIR"
+            chmod 755 "$LOG_DIR"
+            
             check_root
             setup_colors
             check_dependencies
@@ -513,9 +520,23 @@ main() {
             verify_installation
             ;;
         "uninstall")
+            check_root
+            setup_colors
+            
+            # Создаем директорию для логов сразу после проверки root
+            mkdir -p "$LOG_DIR" 2>/dev/null || true
+            chmod 755 "$LOG_DIR" 2>/dev/null || true
+            
             uninstall_system
             ;;
         "update")
+            check_root
+            setup_colors
+            
+            # Создаем директорию для логов сразу после проверки root
+            mkdir -p "$LOG_DIR" 2>/dev/null || true
+            chmod 755 "$LOG_DIR" 2>/dev/null || true
+            
             update_system
             ;;
     esac
