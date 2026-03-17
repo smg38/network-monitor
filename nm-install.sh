@@ -5,9 +5,6 @@
 # Запуск: sudo ./nm-install.sh
 
 set -e  # Выход при ошибке
-с мммммммММ
-# Определяем директорию скрипта
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Загружаем конфигурацию
 # shellcheck disable=SC1091
