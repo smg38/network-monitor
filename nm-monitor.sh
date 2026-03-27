@@ -1,15 +1,34 @@
 #!/bin/bash
 # nm-monitor.sh - Клиент для формирования отчетов и live-мониторинга
-# Версия: 1.4
+# Версия: 1.6
 # Автор: TG: @smg38 smg38@yandex.ru
 # Использование: ./nm-monitor.sh [--live|--summary|--daily|--weekly|--monthly|--top N|--period YYYY-MM-DD YYYY-MM-DD|--help]
 
 set -euo pipefail
 
+# Функция цветов
+setup_colors() {
+    if [ -t 1 ]; then
+        export RED='\033[0;31m'
+        export GREEN='\033[0;32m'
+        export YELLOW='\033[0;33m'
+        export BLUE='\033[0;34m'
+        export MAGENTA='\033[0;35m'
+        export CYAN='\033[0;36m'
+        export WHITE='\033[0;37m'
+        export BOLD='\033[1m'
+        export NC='\033[0m'
+    else
+        unset RED GREEN YELLOW BLUE MAGENTA CYAN WHITE BOLD NC
+    fi
+}
+
+setup_colors
+
 # Загружаем конфигурацию
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
-source "${SCRIPT_DIR}/nm-config.sh"
+source "${SCRIPT_DIR}/nm-config.env"
 
 # Функция логирования
 log() {

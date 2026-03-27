@@ -1,82 +1,111 @@
 #!/bin/bash
-# nm-config - Конфигурационный файл системы мониторинга сети
-# Версия: 1.4
-# Автор: TG: @smg38 smg38@yandex.ru
-# Расположение: /etc/network-monitor/nm-config.sh
+# nm-config.sh - Основной bash-конфиг для разработки/установки (Версия 1.6)
+# Используется: source в nm-install.sh, nm-tests.sh
+# Правила динамически загружаются из БД config_rules (nm-config-rules.sql)
+# nm-config.env = копия только простых переменных для systemd
 
-# Цвета для вывода (если терминал поддерживает)
-setup_colors() {
-    if [ -t 1 ]; then
-        local RED='\033[0;31m'
-        local GREEN='\033[0;32m'
-        local YELLOW='\033[0;33m'
-        local BLUE='\033[0;34m'
-        local MAGENTA='\033[0;35m'
-        local CYAN='\033[0;36m'
-        local WHITE='\033[0;37m'
-        local BOLD='\033[1m'
-        local NC='\033[0m' # No Color
-        export RED GREEN YELLOW BLUE MAGENTA CYAN WHITE BOLD NC
-    else
-        unset RED GREEN YELLOW BLUE MAGENTA CYAN WHITE BOLD NC
-        export RED GREEN YELLOW BLUE MAGENTA CYAN WHITE BOLD NC
+set -euo pipefail
+
+# ========================================
+# ОСНОВНЫЕ ПЕРЕМЕННЫЕ (идентичны nm-config.env)
+# ========================================
+export MAIN_IFACE=ens3                    # Основной интерфейс
+export WG_IFACE=wg0                       # WireGuard интерфейс
+export BASE_DIR=/opt/network-monitor
+export DB_PATH=${BASE_DIR}/nm-data.db
+export CONFIG_PATH=${BASE_DIR}/nm-config.env
+export LOG_DIR=/var/log/network-monitor
+export LOG_FILE=${LOG_DIR}/nm-daemon.log
+export CHECK_INTERVAL=10
+export LOG_LEVEL=INFO
+export LOG_MAX_SIZE=100
+export LOG_MAX_FILES=5
+export TOP_PEERS_DEFAULT=10
+export LIVE_REFRESH_INTERVAL=2
+
+# ========================================
+# ФУНКЦИИ ЗАГРУЗКИ ПРАВИЛ ИЗ БД
+# ========================================
+declare -A COLLECT_RULES=()
+declare -A AGGREGATE_RULES=()
+declare -A CLEANUP_RULES=()
+
+# Загрузка всех правил из таблицы config_rules
+load_config_rules() {
+    local source_type="${1:-db}"  # db|sql
+    
+    if [ "$source_type" = "sql" ] && [ -f "${SCRIPT_DIR}/nm-config-rules.sql" ]; then
+        echo "📥 Загрузка правил из nm-config-rules.sql в БД..."
+        sqlite3 "$DB_PATH" < "${SCRIPT_DIR}/nm-config-rules.sql"
     fi
+    
+    echo "📥 Загрузка активных правил из БД config_rules..."
+    
+    # Очищаем массивы
+    unset COLLECT_RULES AGGREGATE_RULES CLEANUP_RULES
+    declare -A COLLECT_RULES=()
+    declare -A AGGREGATE_RULES=()
+    declare -A CLEANUP_RULES=()
+    
+    # Загружаем правила сбора
+    while IFS='|' read -r rule_key description interval; do
+        [ -n "$rule_key" ] && COLLECT_RULES["$rule_key"]="$description"
+    done < <(sqlite3 "$DB_PATH" "SELECT rule_key, description, interval_sec FROM config_rules WHERE rule_type='collect' AND enabled=1 ORDER BY interval_sec;")
+    
+    # Загружаем правила агрегации (формат: input:window → output:window:description)
+    while IFS='|' read -r rule_key output window description; do
+        local input_type
+        input_type=$(echo "$rule_key" | cut -d: -f1)
+        local run_interval
+        run_interval=$(echo "$rule_key" | cut -d: -f2)
+        [ -n "$output" ] && AGGREGATE_RULES["${input_type}:${run_interval}"]="${output}:${window}:${description}"
+    done < <(sqlite3 "$DB_PATH" "SELECT rule_key, description, window_sec, interval_sec FROM config_rules WHERE rule_type='aggregate' AND enabled=1 ORDER BY interval_sec;")
+    
+    # Загружаем правила очистки
+    while IFS='|' read -r data_type retention; do
+        [ -n "$data_type" ] && CLEANUP_RULES["$data_type"]="$retention"
+    done < <(sqlite3 "$DB_PATH" "SELECT rule_key, retention_days FROM config_rules WHERE rule_type='cleanup' AND enabled=1;")
+    
+    echo "✅ Загружено правил: collect=${#COLLECT_RULES[@]}, aggregate=${#AGGREGATE_RULES[@]}, cleanup=${#CLEANUP_RULES[@]}"
 }
 
-# --- ОСНОВНЫЕ ИНТЕРФЕЙСЫ ---
-# Выбираются при установке, можно изменить вручную
-export MAIN_IFACE="ens3"             # Основной интерфейс для мониторинга
-export WG_IFACE="wg0"                # WireGuard интерфейс (пусто, если нет)
+# Проверка доступности БД для загрузки правил
+check_db_ready() {
+    if [ ! -f "$DB_PATH" ]; then
+        echo "⚠ БД не создана, используем дефолтные правила при первой установке"
+        return 1
+    fi
+    sqlite3 "$DB_PATH" "SELECT name FROM sqlite_master WHERE type='table' AND name='config_rules';" >/dev/null 2>&1
+}
 
-# --- ДИРЕКТОРИИ ---
-export BASE_DIR="/opt/network-monitor"
-export DB_PATH="${BASE_DIR}/nm-data.db"
-export CONFIG_PATH="${BASE_DIR}/nm-config.sh"
-export LOG_DIR="/var/log/network-monitor"
-export LOG_FILE="${LOG_DIR}/nm-daemon.log"
+# Автозагрузка правил при source (если БД готова)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if check_db_ready; then
+    load_config_rules
+else
+    echo "ℹ БД недоступна, правила будут загружены при установке"
+fi
 
-# --- ПРАВИЛА СБОРА ДАННЫХ (RAW DATA) ---
-# Формат: COLLECT_RULES[интервал_в_секундах]="описание"
-# Интервал определяет, как часто собираются сырые данные
-declare -A COLLECT_RULES=(
-    ["5"]="Сбор сырых данных каждые 5 секунд (максимальная детализация)"
-    ["60"]="Сбор сырых данных каждую минуту (для долгосрочного хранения)"
-)
-export COLLECT_RULES
+# ========================================
+# УТИЛИТЫ ДЛЯ ОТЛАДКИ (bash only)
+# ========================================
+config_debug() {
+    echo "=== Network Monitor Config Debug ==="
+    echo "MAIN_IFACE: $MAIN_IFACE"
+    echo "WG_IFACE: $WG_IFACE"
+    echo "DB_PATH: $DB_PATH"
+    echo ""
+    echo "=== Collect Rules ==="
+    for key in "${!COLLECT_RULES[@]}"; do echo "  $key → ${COLLECT_RULES[$key]}"; done
+    echo ""
+    echo "=== Aggregate Rules ==="  
+    for key in "${!AGGREGATE_RULES[@]}"; do echo "  $key → ${AGGREGATE_RULES[$key]}"; done
+    echo ""
+    echo "=== Cleanup Rules ==="
+    for key in "${!CLEANUP_RULES[@]}"; do echo "  $key → ${CLEANUP_RULES[$key]} дней"; done
+}
 
-# --- ПРАВИЛА АГРЕГАЦИИ ---
-# Формат: AGGREGATE_RULES[входной_тип:интервал_запуска]="выходной_тип:окно_агрегации:описание"
-# входной_тип: raw, agg_5min, agg_hour, agg_day
-# интервал_запуска: как часто выполнять эту агрегацию (в секундах)
-# выходной_тип: тип создаваемых записей
-# окно_агрегации: за какой период собирать данные (в секундах)
-declare -A AGGREGATE_RULES=(
-    ["raw:300"]="agg_5min:300:Агрегация за 5 минут из сырых данных (каждые 5 мин)"
-    ["raw:3600"]="agg_hour:3600:Агрегация за час из сырых данных (каждый час)"
-    ["agg_5min:3600"]="agg_hour_from_5min:3600:Агрегация за час из 5-минутных данных (каждый час)"
-    ["agg_hour:86400"]="agg_day:86400:Агрегация за сутки из часовых данных (раз в день)"
-)
-export AGGREGATE_RULES
-
-# --- ПРАВИЛА ОЧИСТКИ ---
-# Формат: CLEANUP_RULES[тип_данных]="срок_хранения_в_днях"
-declare -A CLEANUP_RULES=(
-    ["raw"]="7"              # Сырые данные храним 7 дней
-    ["agg_5min"]="30"        # 5-минутные агрегаты - 30 дней
-    ["agg_hour"]="90"        # Часовые агрегаты - 90 дней
-    ["agg_hour_from_5min"]="90"  # Часовые из 5-минутных - 90 дней
-    ["agg_day"]="365"        # Дневные агрегаты - год
-)
-export CLEANUP_RULES
-
-# --- ИНТЕРВАЛЫ ПРОВЕРКИ (в секундах) ---
-export CHECK_INTERVAL=10       # Как часто демон проверяет необходимость выполнения задач
-
-# --- НАСТРОЙКИ ЛОГИРОВАНИЯ ---
-export LOG_LEVEL="INFO"        # DEBUG, INFO, WARN, ERROR
-export LOG_MAX_SIZE="100"      # Максимальный размер лога в MB перед ротацией
-export LOG_MAX_FILES="5"       # Количество хранимых файлов лога при ротации
-
-# --- ПАРАМЕТРЫ ОТЧЕТОВ ---
-export TOP_PEERS_DEFAULT=10    # Количество клиентов в топ-отчетах по умолчанию
-export LIVE_REFRESH_INTERVAL=2 # Интервал обновления live-режима (секунды)
+# Пример использования:
+# source nm-config.sh
+# config_debug
+# load_config_rules sql    # перезагрузка из SQL-дампа

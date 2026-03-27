@@ -1,4 +1,4 @@
-# Network Monitor v1.4
+# Network Monitor v1.6
 
 [![Автор](https://img.shields.io/badge/TG-@smg38-blue)](https://t.me/smg38)
 [![Email](https://img.shields.io/badge/email-smg38%40yandex.ru-red)](mailto:smg38@yandex.ru)
@@ -52,26 +52,22 @@ sudo nm-monitor.sh --live
 
 ## ⚙️ Конфигурация
 
-`/opt/network-monitor/nm-config` - **центральный конфиг**:
+**Правила в БД** `/opt/network-monitor/nm-data.db → config_rules`:
 
 ```bash
-# Интерфейсы
-MAIN_IFACE="ens3"    # Основной
-WG_IFACE="wg0"       # WireGuard
+# Управление правилами (НЕ bash-код, SQLite!)
+sqlite3 nm-data.db "UPDATE config_rules SET enabled=0 WHERE rule_key='5'"
+sqlite3 nm-data.db "SELECT * FROM config_rules WHERE enabled=1"
 
-# Правила сбора (каждые N секунд)
-COLLECT_RULES["5"]="сырые данные каждые 5с"
-COLLECT_RULES["60"]="сырые данные каждую минуту"
+# Примеры правил (v1.6):
+# collect: 5s, 60s
+# aggregate: raw→agg_5min(5min)→agg_hour(1h)→agg_day(1day)
+# cleanup: raw=7d, agg_5min=30d, agg_hour=90d, agg_day=365d
 
-# Правила агрегации
-AGGREGATE_RULES["raw:300"]="agg_5min:300:5-минутная агрегация"
-AGGREGATE_RULES["raw:3600"]="agg_hour:3600:часовая агрегация"
-
-# Очистка (дней хранения)
-CLEANUP_RULES["raw"]="7"
-CLEANUP_RULES["agg_5min"]="30"
-CLEANUP_RULES["agg_hour"]="90"
-```
+# Простые переменные: nm-config.env
+MAIN_IFACE="ens3"
+WG_IFACE="wg0" 
+LOG_LEVEL="INFO"
 
 ## 🗄️ База данных
 
@@ -89,7 +85,7 @@ CLEANUP_RULES["agg_hour"]="90"
 
 ```
 /opt/network-monitor/     ← BASE_DIR
-├── nm-config             ← Правила
+├── nm-config.env         ← Переменные env
 ├── nm-daemon.sh          ← Демон
 ├── nm-monitor.sh         ← Отчеты
 ├── nm-data.db            ← База

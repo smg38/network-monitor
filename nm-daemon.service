@@ -1,5 +1,5 @@
 # nm-daemon.service - systemd сервис для Network Monitor
-# Версия: 1.4
+# Версия: 1.5
 # Автор: TG: @smg38 smg38@yandex.ru
 
 [Unit]
@@ -12,10 +12,10 @@ Documentation=https://github.com/your-repo/network-monitor
 Type=simple
 User=root
 Group=root
-WorkingDirectory=%h
+WorkingDirectory=/opt/network-monitor
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-EnvironmentFile=%h/nm-config
-ExecStart=%h/nm-daemon.sh
+EnvironmentFile=/opt/network-monitor/nm-config.env
+ExecStart=/opt/network-monitor/nm-daemon.sh
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=10

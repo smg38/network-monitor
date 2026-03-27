@@ -1,9 +1,10 @@
-
 #!/bin/bash
 # nm-install.sh - Установщик системы мониторинга сети  
-# Версия: 1.4
+# Версия: 1.6
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запуск: ./nm-install.sh (от root, sudo НЕ нужен)
+
+VERSION="1.6"
 
 set -e  # Выход при ошибке
 
@@ -262,6 +263,20 @@ CREATE TABLE task_last_run (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Таблица правил мониторинга (config_rules)
+CREATE TABLE config_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_type TEXT NOT NULL CHECK(rule_type IN ('collect', 'aggregate', 'cleanup')),
+    rule_key TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL,
+    interval_sec INTEGER NOT NULL DEFAULT 60,
+    window_sec INTEGER DEFAULT NULL,
+    retention_days INTEGER DEFAULT NULL,
+    enabled BOOLEAN DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Индексы для оптимизации запросов
 CREATE INDEX idx_interfaces_type_time ON interfaces_stats(data_type, timestamp);
 CREATE INDEX idx_interfaces_iface_time ON interfaces_stats(interface, timestamp);
@@ -269,8 +284,13 @@ CREATE INDEX idx_peers_type_time ON wg_peers_stats(data_type, timestamp);
 CREATE INDEX idx_peers_key_time ON wg_peers_stats(peer_key, timestamp);
 CREATE INDEX idx_tasks_type_status ON tasks_log(task_type, status);
 CREATE INDEX idx_tasks_time ON tasks_log(started_at);
+CREATE INDEX idx_rules_type_key ON config_rules(rule_type, rule_key);
+CREATE INDEX idx_rules_enabled ON config_rules(enabled, rule_type);
 
--- Представление для удобных отчетов по интерфейсам
+-- Импорт правил мониторинга из SQL-дампа (версия 1.6)
+.read "${SCRIPT_DIR}/nm-config-rules.sql"
+
+-- Представление для отчетов по интерфейсам (обновлено для новых типов данных)
 CREATE VIEW v_interface_daily AS
 SELECT 
     date(timestamp) as day,
@@ -282,7 +302,7 @@ SELECT
     MAX(max_rx_rate) as peak_rx_rate,
     MAX(max_tx_rate) as peak_tx_rate
 FROM interfaces_stats 
-WHERE data_type = 'agg_5min'
+WHERE data_type IN ('agg_5min', 'agg_hour')
 GROUP BY date(timestamp), interface;
 
 -- Представление для отчетов по клиентам
@@ -305,7 +325,7 @@ EOF
 INSERT INTO config (key, value) VALUES ('main_iface', '$MAIN_IFACE');
 INSERT INTO config (key, value) VALUES ('wg_iface', '$WG_IFACE');
 INSERT INTO config (key, value) VALUES ('install_date', datetime('now'));
-INSERT INTO config (key, value) VALUES ('version', '1.4');
+INSERT INTO config (key, value) VALUES ('version', '$VERSION');
 EOF
 
     chmod 644 "$DB_PATH"
@@ -318,9 +338,9 @@ create_systemd_service() {
     
     local service_file="/etc/systemd/system/nm-daemon.service"
     
-    tee "$service_file" <<EOF
+tee "$service_file" <<EOF
 # nm-daemon.service - systemd сервис для Network Monitor
-# Версия: 1.4.1
+# Версия: $VERSION
 # Автор: TG: @smg38 smg38@yandex.ru
 
 [Unit]
@@ -335,7 +355,7 @@ User=root
 Group=root
 WorkingDirectory=${BASE_DIR}
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-EnvironmentFile=${BASE_DIR}/nm-config.sh
+EnvironmentFile=${BASE_DIR}/nm-config.env
 ExecStart=${BASE_DIR}/nm-daemon.sh
 ExecReload=/bin/kill -HUP \$MAINPID
 Restart=always
@@ -379,11 +399,23 @@ copy_scripts() {
     cp nm-daemon.sh "$BASE_DIR/"
     chmod 755 "$BASE_DIR/nm-daemon.sh"
     
-    # Копируем конфиг
-    cp nm-config.sh "$BASE_DIR/"
-    chmod 644 "$BASE_DIR/nm-config.sh"
+# Копируем основной скрипт мониторинга
+    cp nm-monitor.sh "$BASE_DIR/"
+    chmod 755 "$BASE_DIR/nm-monitor.sh"
     
-    log "INFO" "Скрипты скопированы"
+    # Копируем демон
+    cp nm-daemon.sh "$BASE_DIR/"
+    chmod 755 "$BASE_DIR/nm-daemon.sh"
+    
+    # Копируем чистый env-конфиг (без bash-кода)
+    cp nm-config.env "$BASE_DIR/nm-config.env"
+    chmod 644 "$BASE_DIR/nm-config.env"
+    
+    # Копируем SQL-правила мониторинга
+    cp nm-config-rules.sql "$BASE_DIR/"
+    chmod 644 "$BASE_DIR/nm-config-rules.sql"
+    
+    log "INFO" "Скрипты и конфигурация скопированы (v${VERSION})"
 }
 
 # Настройка логов
@@ -463,7 +495,7 @@ update_system() {
     
     # Обновляем версию в БД
     if [ -f "$DB_PATH" ]; then
-        sqlite3 "$DB_PATH" "UPDATE config SET value='1.4', updated_at=datetime('now') WHERE key='version';"
+        sqlite3 "$DB_PATH" "UPDATE config SET value='$VERSION', updated_at=datetime('now') WHERE key='version';"
     fi
     
     log "INFO" "Перегенерация systemd сервиса..."
@@ -475,7 +507,7 @@ update_system() {
     
     log "INFO" "Обновление конфигурации..."
     #log "INFO" "Обновление завершено успешно!"
-    echo -e "\n${GREEN}${BOLD}Система мониторинга сети успешно обновлена до версии 1.4!${NC}"
+    echo -e "\n${GREEN}${BOLD}Система мониторинга сети успешно обновлена до версии $VERSION !${NC}"
 }
 
 # Проверка установки
@@ -487,7 +519,7 @@ verify_installation() {
     # Проверяем наличие всех файлов
     [ -f "$BASE_DIR/nm-monitor.sh" ] || { log "ERROR" "nm-monitor.sh не найден"; errors=1; }
     [ -f "$BASE_DIR/nm-daemon.sh" ] || { log "ERROR" "nm-daemon.sh не найден"; errors=1; }
-    [ -f "$BASE_DIR/nm-config.sh" ] || { log "ERROR" "nm-config.sh не найден"; errors=1; }
+[ -f "$BASE_DIR/nm-config.env" ] || { log "ERROR" "nm-config.env не найден"; errors=1; }
     [ -f "$DB_PATH" ] || { log "ERROR" "База данных не найдена"; errors=1; }
     
     # Проверяем права
@@ -517,7 +549,7 @@ main() {
     
     case "$ACTION" in
         "install")
-            echo -e "${BOLD}${BLUE}Установка системы мониторинга сети v1.4${NC}\n"
+            echo -e "${BOLD}${BLUE}Установка системы мониторинга сети версии $VERSION ${NC}\n"
             
             # Создаем директорию для логов сразу после проверки root
             mkdir -p "$LOG_DIR"

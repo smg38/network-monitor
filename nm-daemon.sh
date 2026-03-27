@@ -1,15 +1,29 @@
 #!/bin/bash
 # nm-daemon.sh - Демон сбора и агрегации данных сетевого мониторинга
-# Версия: 1.4
+# Версия: 1.6
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запускается как systemd сервис
 
 set -euo pipefail  # Строгий режим
 
-# Загружаем конфигурацию
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck disable=SC1091
-source "${SCRIPT_DIR}/nm-config.sh"
+# Функция цветов (дублируем из config)
+setup_colors() {
+    if [ -t 1 ]; then
+        export RED='\033[0;31m'
+        export GREEN='\033[0;32m'
+        export YELLOW='\033[0;33m'
+        export BLUE='\033[0;34m'
+        export MAGENTA='\033[0;35m'
+        export CYAN='\033[0;36m'
+        export WHITE='\033[0;37m'
+        export BOLD='\033[1m'
+        export NC='\033[0m'
+    else
+        unset RED GREEN YELLOW BLUE MAGENTA CYAN WHITE BOLD NC
+    fi
+}
+
+setup_colors
 
 # Функция логирования
 log() {
@@ -36,6 +50,26 @@ log() {
         echo "${timestamp} [${level}] ${message}"
     fi
 }
+
+# Загружаем базовый конфиг + правила из БД (v1.6)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Базовые переменные из env (systemd)
+if [ -f "${SCRIPT_DIR}/nm-config.env" ]; then
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/nm-config.env"
+    log "INFO" "Загружен базовый конфиг из nm-config.env"
+else
+    log "ERROR" "nm-config.env не найден: ${SCRIPT_DIR}/nm-config.env"
+    exit 1
+fi
+
+# Загружаем динамические правила из БД (функция из nm-config.sh)
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/../nm-config.sh"  # Полный путь к корню проекта
+load_config_rules db
+
+log "INFO" "Демон v1.6: config_rules загружены (${#COLLECT_RULES[@]} collect, ${#AGGREGATE_RULES[@]} aggregate)"
 
 # Функция для получения последнего запуска задачи из БД
 get_last_run() {
