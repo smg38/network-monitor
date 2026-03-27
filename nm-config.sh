@@ -52,8 +52,13 @@ declare -A AGGREGATE_RULES=()
 declare -A CLEANUP_RULES=()
 
 # ✅ ИСПРАВЛЕНО: Проверка доступности БД
+# check_db_ready() {
+#     [ -f "$DB_PATH" ] && sqlite3 "$DB_PATH" "SELECT name FROM sqlite_master WHERE type='table' AND name='config_rules';" >/dev/null 2>&1
+# }
+
 check_db_ready() {
-    [ -f "$DB_PATH" ] && sqlite3 "$DB_PATH" "SELECT name FROM sqlite_master WHERE type='table' AND name='config_rules';" >/dev/null 2>&1
+    [ -f "$DB_PATH" ] || return 1
+    sqlite3 "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='config_rules';" | grep -q 1
 }
 
 # ✅ ИСПРАВЛЕНО: Защита от отсутствия БД при --remove
@@ -84,11 +89,13 @@ load_config_rules() {
     done < <(sqlite3 "$DB_PATH" "SELECT rule_key, description, interval_sec FROM config_rules WHERE rule_type='collect' AND enabled=1 ORDER BY interval_sec;")
     
     # Загружаем правила агрегации
-    while IFS='|' read -r rule_key output window description; do
+    #while IFS='|' read -r rule_key output window description; do
+    while IFS='|' read -r rule_key description window interval; do
         local input_type run_interval
         input_type=$(echo "$rule_key" | cut -d: -f1)
         run_interval=$(echo "$rule_key" | cut -d: -f2)
-        [ -n "$output" ] && AGGREGATE_RULES["${input_type}:${run_interval}"]="${output}:${window}:${description}"
+        #[ -n "$output" ] && AGGREGATE_RULES["${input_type}:${run_interval}"]="${output}:${window}:${description}"
+        [ -n "$description" ] && AGGREGATE_RULES["${input_type}:${run_interval}"]="${description}:${window}:${interval}"
     done < <(sqlite3 "$DB_PATH" "SELECT rule_key, description, window_sec, interval_sec FROM config_rules WHERE rule_type='aggregate' AND enabled=1 ORDER BY interval_sec;")
     
     # Загружаем правила очистки

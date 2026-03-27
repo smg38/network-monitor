@@ -28,7 +28,8 @@ setup_colors
 # Загружаем конфигурацию
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
-source "${SCRIPT_DIR}/nm-config.env"
+#source "${SCRIPT_DIR}/nm-config.env"
+source "${SCRIPT_DIR}/nm-config.sh"
 
 # Функция логирования
 log() {

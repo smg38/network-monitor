@@ -68,8 +68,8 @@ fi
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/nm-config.sh"     # Локальная копия в директории демона (автозагрузка правил)
 
-collect_count=${#COLLECT_RULES[@]:-0}
-aggregate_count=${#AGGREGATE_RULES[@]:-0}
+collect_count=${#COLLECT_RULES[@]}
+aggregate_count=${#AGGREGATE_RULES[@]}
 log "INFO" "Демон v1.6.4: config_rules загружены ($collect_count collect, $aggregate_count aggregate)"
 
 # Функция для получения последнего запуска задачи из БД

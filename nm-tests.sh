@@ -1,6 +1,6 @@
 #!/bin/bash
 # nm-tests.sh - Юнит-тесты Network Monitor
-# Версия: 1.4
+# Версия: 1.6.4
 # Автор: TG: @smg38 smg38@yandex.ru
 
 set -euo pipefail
@@ -42,7 +42,9 @@ test_directories() {
 
 # Тест 2: Валидация конфигурации v1.6 (БД config_rules)
 test_config() {
-    run_test "Конфиг загружен (v1.6)" "declare -p COLLECT_RULES >/dev/null 2>&1"
+    #run_test "Конфиг загружен (v1.6)" "declare -p COLLECT_RULES >/dev/null 2>&1"
+    run_test "COLLECT_RULES объявлен" "declare -p COLLECT_RULES >/dev/null 2>&1"
+    run_test "COLLECT_RULES не пуст" "[ \${#COLLECT_RULES[@]} -gt 0 ]"
     run_test "БД config_rules существует" "sqlite3 \$DB_PATH \"SELECT count(*) FROM config_rules;\" | grep -q '[1-9]'"
     run_test "Активные правила в БД" "sqlite3 \$DB_PATH \"SELECT count(*) FROM config_rules WHERE enabled=1;\" | grep -q '[1-9]'"
     run_test "Правила загружены в bash" "[ \${#COLLECT_RULES[@]} -gt 0 ] || [ \${#AGGREGATE_RULES[@]} -gt 0 ] || [ \${#CLEANUP_RULES[@]} -gt 0 ]"
