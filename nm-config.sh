@@ -1,10 +1,28 @@
 #!/bin/bash
-# nm-config.sh - Основной bash-конфиг для разработки/установки (Версия 1.6)
+# nm-config.sh - Основной bash-конфиг для разработки/установки (Версия 1.6.1)
 # Используется: source в nm-install.sh, nm-tests.sh
 # Правила динамически загружаются из БД config_rules (nm-config-rules.sql)
 # nm-config.env = копия только простых переменных для systemd
+# ✅ ИСПРАВЛЕНО: Добавлена setup_colors() + защита от отсутствия БД (2026-03-27)
 
 set -euo pipefail
+
+# ========================================
+# ЦВЕТА ТЕРМИНАЛА (новая функция)
+# ========================================
+setup_colors() {
+    if [ -t 1 ]; then
+        RED='\033[0;31m'
+        GREEN='\033[0;32m'
+        YELLOW='\033[1;33m'
+        BLUE='\033[0;34m'
+        BOLD='\033[1m'
+        NC='\033[0m'
+    else
+        RED='' GREEN='' YELLOW='' BLUE='' BOLD='' NC=''
+    fi
+    export RED GREEN YELLOW BLUE BOLD NC
+}
 
 # ========================================
 # ОСНОВНЫЕ ПЕРЕМЕННЫЕ (идентичны nm-config.env)
@@ -23,20 +41,33 @@ export LOG_MAX_FILES=5
 export TOP_PEERS_DEFAULT=10
 export LIVE_REFRESH_INTERVAL=2
 
+# Автозагрузка цветов при source
+setup_colors
+
 # ========================================
-# ФУНКЦИИ ЗАГРУЗКИ ПРАВИЛ ИЗ БД
+# ФУНКЦИИ ЗАГРУЗКИ ПРАВИЛ ИЗ БД (ЗАЩИЩЕНЫ)
 # ========================================
 declare -A COLLECT_RULES=()
 declare -A AGGREGATE_RULES=()
 declare -A CLEANUP_RULES=()
 
-# Загрузка всех правил из таблицы config_rules
+# ✅ ИСПРАВЛЕНО: Проверка доступности БД
+check_db_ready() {
+    [ -f "$DB_PATH" ] && sqlite3 "$DB_PATH" "SELECT name FROM sqlite_master WHERE type='table' AND name='config_rules';" >/dev/null 2>&1
+}
+
+# ✅ ИСПРАВЛЕНО: Защита от отсутствия БД при --remove
 load_config_rules() {
     local source_type="${1:-db}"  # db|sql
     
     if [ "$source_type" = "sql" ] && [ -f "${SCRIPT_DIR}/nm-config-rules.sql" ]; then
         echo "📥 Загрузка правил из nm-config-rules.sql в БД..."
-        sqlite3 "$DB_PATH" < "${SCRIPT_DIR}/nm-config-rules.sql"
+        [ -f "$DB_PATH" ] && sqlite3 "$DB_PATH" < "${SCRIPT_DIR}/nm-config-rules.sql"
+    fi
+    
+    if ! check_db_ready; then
+        echo "⚠️  БД недоступна (--remove?), пропускаем загрузку правил из config_rules"
+        return 0
     fi
     
     echo "📥 Загрузка активных правил из БД config_rules..."
@@ -52,11 +83,10 @@ load_config_rules() {
         [ -n "$rule_key" ] && COLLECT_RULES["$rule_key"]="$description"
     done < <(sqlite3 "$DB_PATH" "SELECT rule_key, description, interval_sec FROM config_rules WHERE rule_type='collect' AND enabled=1 ORDER BY interval_sec;")
     
-    # Загружаем правила агрегации (формат: input:window → output:window:description)
+    # Загружаем правила агрегации
     while IFS='|' read -r rule_key output window description; do
-        local input_type
+        local input_type run_interval
         input_type=$(echo "$rule_key" | cut -d: -f1)
-        local run_interval
         run_interval=$(echo "$rule_key" | cut -d: -f2)
         [ -n "$output" ] && AGGREGATE_RULES["${input_type}:${run_interval}"]="${output}:${window}:${description}"
     done < <(sqlite3 "$DB_PATH" "SELECT rule_key, description, window_sec, interval_sec FROM config_rules WHERE rule_type='aggregate' AND enabled=1 ORDER BY interval_sec;")
@@ -67,15 +97,6 @@ load_config_rules() {
     done < <(sqlite3 "$DB_PATH" "SELECT rule_key, retention_days FROM config_rules WHERE rule_type='cleanup' AND enabled=1;")
     
     echo "✅ Загружено правил: collect=${#COLLECT_RULES[@]}, aggregate=${#AGGREGATE_RULES[@]}, cleanup=${#CLEANUP_RULES[@]}"
-}
-
-# Проверка доступности БД для загрузки правил
-check_db_ready() {
-    if [ ! -f "$DB_PATH" ]; then
-        echo "⚠ БД не создана, используем дефолтные правила при первой установке"
-        return 1
-    fi
-    sqlite3 "$DB_PATH" "SELECT name FROM sqlite_master WHERE type='table' AND name='config_rules';" >/dev/null 2>&1
 }
 
 # Автозагрузка правил при source (если БД готова)
@@ -90,10 +111,11 @@ fi
 # УТИЛИТЫ ДЛЯ ОТЛАДКИ (bash only)
 # ========================================
 config_debug() {
-    echo "=== Network Monitor Config Debug ==="
+    echo "=== Network Monitor Config Debug (${VERSION:-1.6.1}) ==="
     echo "MAIN_IFACE: $MAIN_IFACE"
     echo "WG_IFACE: $WG_IFACE"
     echo "DB_PATH: $DB_PATH"
+    echo "DB_READY: $(check_db_ready && echo 'YES' || echo 'NO')"
     echo ""
     echo "=== Collect Rules ==="
     for key in "${!COLLECT_RULES[@]}"; do echo "  $key → ${COLLECT_RULES[$key]}"; done
@@ -109,3 +131,4 @@ config_debug() {
 # source nm-config.sh
 # config_debug
 # load_config_rules sql    # перезагрузка из SQL-дампа
+

@@ -1,10 +1,10 @@
 #!/bin/bash
 # nm-install.sh - Установщик системы мониторинга сети  
-# Версия: 1.6
+# Версия: 1.6.1
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запуск: ./nm-install.sh (от root, sudo НЕ нужен)
 
-VERSION="1.6"
+VERSION="1.6.1"
 
 set -e  # Выход при ошибке
 
@@ -287,7 +287,7 @@ CREATE INDEX idx_tasks_time ON tasks_log(started_at);
 CREATE INDEX idx_rules_type_key ON config_rules(rule_type, rule_key);
 CREATE INDEX idx_rules_enabled ON config_rules(enabled, rule_type);
 
--- Импорт правил мониторинга из SQL-дампа (версия 1.6)
+-- Импорт правил мониторинга из SQL-дампа (версия $VERSION)
 .read "${SCRIPT_DIR}/nm-config-rules.sql"
 
 -- Представление для отчетов по интерфейсам (обновлено для новых типов данных)
@@ -551,10 +551,12 @@ main() {
         "install")
             echo -e "${BOLD}${BLUE}Установка системы мониторинга сети версии $VERSION ${NC}\n"
             
-            # Создаем директорию для логов сразу после проверки root
+            # Создаем директорию для логов сразу (для log())
             mkdir -p "$LOG_DIR"
             chmod 755 "$LOG_DIR"
             
+            # ✅ ИСПРАВЛЕНО: source ДО setup_colors (2026-03-27)
+            source "${SCRIPT_DIR}/nm-config.sh"
             check_root
             setup_colors
             check_dependencies
@@ -567,22 +569,28 @@ main() {
             verify_installation
             ;;
         "uninstall")
-            check_root
-            setup_colors
+check_root
             
-            # Создаем директорию для логов сразу после проверки root
+            # Создаем директорию для логов сразу после проверки root (для log())
             mkdir -p "$LOG_DIR" 2>/dev/null || true
             chmod 755 "$LOG_DIR" 2>/dev/null || true
+            
+            # ✅ ИСПРАВЛЕНО: source ДО setup_colors (2026-03-27)
+            source "${SCRIPT_DIR}/nm-config.sh"
+            setup_colors
             
             uninstall_system
             ;;
         "update")
             check_root
-            setup_colors
             
-            # Создаем директорию для логов сразу после проверки root
+            # Создаем директорию для логов сразу после проверки root (для log())
             mkdir -p "$LOG_DIR" 2>/dev/null || true
             chmod 755 "$LOG_DIR" 2>/dev/null || true
+            
+            # ✅ ИСПРАВЛЕНО: source ДО setup_colors (2026-03-27)
+            source "${SCRIPT_DIR}/nm-config.sh"
+            setup_colors
             
             update_system
             ;;
