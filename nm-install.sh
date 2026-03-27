@@ -1,10 +1,10 @@
 #!/bin/bash
 # nm-install.sh - Установщик системы мониторинга сети  
-# Версия: 1.6.1
+# Версия: 1.6.4
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запуск: ./nm-install.sh (от root, sudo НЕ нужен)
 
-VERSION="1.6.1"
+VERSION="1.6.4"
 
 set -e  # Выход при ошибке
 
@@ -391,15 +391,7 @@ EOF
 copy_scripts() {
     log "INFO" "Копирование скриптов в $BASE_DIR..."
     
-    # Копируем основной скрипт
-    cp nm-monitor.sh "$BASE_DIR/"
-    chmod 755 "$BASE_DIR/nm-monitor.sh"
-    
-    # Копируем демон
-    cp nm-daemon.sh "$BASE_DIR/"
-    chmod 755 "$BASE_DIR/nm-daemon.sh"
-    
-# Копируем основной скрипт мониторинга
+# Копируем основной скрипт
     cp nm-monitor.sh "$BASE_DIR/"
     chmod 755 "$BASE_DIR/nm-monitor.sh"
     
@@ -410,6 +402,10 @@ copy_scripts() {
     # Копируем чистый env-конфиг (без bash-кода)
     cp nm-config.env "$BASE_DIR/nm-config.env"
     chmod 644 "$BASE_DIR/nm-config.env"
+    
+    # Копируем конфигурацию (функции + правила)
+    cp nm-config.sh "$BASE_DIR/"
+    chmod 644 "$BASE_DIR/nm-config.sh"
     
     # Копируем SQL-правила мониторинга
     cp nm-config-rules.sql "$BASE_DIR/"
@@ -462,10 +458,10 @@ uninstall_system() {
     
     log "INFO" "Удаление файлов..."
     rm -rf "$BASE_DIR"
-    rm -rf "$LOG_DIR"
-    rm -f /etc/logrotate.d/network-monitor
     
     log "INFO" "Удаление завершено успешно!"
+    rm -f /etc/logrotate.d/network-monitor
+    rm -rf "$LOG_DIR"
     echo -e "\n${GREEN}${BOLD}Система мониторинга сети успешно удалена!${NC}"
 }
 
@@ -569,13 +565,13 @@ main() {
             verify_installation
             ;;
         "uninstall")
-check_root
+            # Создаем директорию для логов ПЕРЕД check_root (фикс tee в log())
+            mkdir -p /var/log/network-monitor 2>/dev/null || true
+            chmod 755 /var/log/network-monitor 2>/dev/null || true
             
-            # Создаем директорию для логов сразу после проверки root (для log())
-            mkdir -p "$LOG_DIR" 2>/dev/null || true
-            chmod 755 "$LOG_DIR" 2>/dev/null || true
+            check_root
             
-            # ✅ ИСПРАВЛЕНО: source ДО setup_colors (2026-03-27)
+            # Source config ПОСЛЕ check_root (SQLite ошибки подавлены)
             source "${SCRIPT_DIR}/nm-config.sh"
             setup_colors
             

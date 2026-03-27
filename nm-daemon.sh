@@ -1,6 +1,6 @@
 #!/bin/bash
 # nm-daemon.sh - Демон сбора и агрегации данных сетевого мониторинга
-# Версия: 1.6
+# Версия: 1.6.4
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запускается как systemd сервис
 
@@ -51,7 +51,7 @@ log() {
     fi
 }
 
-# Загружаем базовый конфиг + правила из БД (v1.6)
+# Загружаем базовый конфиг + правила из БД (v1.6.4)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Базовые переменные из env (systemd)
@@ -66,10 +66,11 @@ fi
 
 # Загружаем динамические правила из БД (функция из nm-config.sh)
 # shellcheck disable=SC1091
-source "${SCRIPT_DIR}/../nm-config.sh"  # Полный путь к корню проекта
-load_config_rules db
+source "${SCRIPT_DIR}/nm-config.sh"     # Локальная копия в директории демона (автозагрузка правил)
 
-log "INFO" "Демон v1.6: config_rules загружены (${#COLLECT_RULES[@]} collect, ${#AGGREGATE_RULES[@]} aggregate)"
+collect_count=${#COLLECT_RULES[@]:-0}
+aggregate_count=${#AGGREGATE_RULES[@]:-0}
+log "INFO" "Демон v1.6.4: config_rules загружены ($collect_count collect, $aggregate_count aggregate)"
 
 # Функция для получения последнего запуска задачи из БД
 get_last_run() {
