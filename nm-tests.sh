@@ -1,6 +1,6 @@
 #!/bin/bash
 # nm-tests.sh - Юнит-тесты Network Monitor
-# Версия: 1.6.4
+# Версия: 1.7.0
 # Автор: TG: @smg38 smg38@yandex.ru
 
 set -euo pipefail

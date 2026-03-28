@@ -1,5 +1,5 @@
 #!/bin/bash
-# nm-config.sh - Основной bash-конфиг для разработки/установки (Версия 1.6.1)
+# nm-config.sh - Основной bash-конфиг для разработки/установки (Версия 1.7.0)
 # Используется: source в nm-install.sh, nm-tests.sh
 # Правила динамически загружаются из БД config_rules (nm-config-rules.sql)
 # nm-config.env = копия только простых переменных для systemd

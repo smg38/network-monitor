@@ -1,1 +1,18 @@
-Nothing should be ignored based on the provided file changes. The added and modified files (`.sh` scripts) are source code files that should be tracked in version control.
+```
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# Original rules preserved
+*.log
+```
