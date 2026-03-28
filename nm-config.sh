@@ -83,12 +83,14 @@ load_config_rules() {
 }
 
 # Автозагрузка правил при source (если БД готова)
+# ЗАПРЕЩЕНО: автоматическая загрузка отключена для предотвращения конфликтов
+# Вызывайте load_config_rules явно в основном скрипте
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if check_db_ready; then
-    load_config_rules
-else
-    echo "ℹ БД недоступна, правила будут загружены при установке"
-fi
+# if check_db_ready; then
+#     load_config_rules
+# else
+#     echo "ℹ БД недоступна, правила будут загружены при установке"
+# fi
 
 # ========================================
 # УТИЛИТЫ ДЛЯ ОТЛАДКИ (bash only)

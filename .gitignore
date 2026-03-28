@@ -1,52 +1,51 @@
 ```bash
-# Compiled and binary files
+# Compiled and build artifacts
 *.pyc
-*.class
 *.o
-*.exe
-*.dll
-*.so
-*.a
 *.obj
 *.out
+dist/
+build/
+target/
 
 # Dependencies
-node_modules/
-venv/
 .venv/
+venv/
 __pycache__/
 .mypy_cache/
 .pytest_cache/
-target/
-.gradle/
+node_modules/
+.julia/
+.zig-cache/
 
-# Build artifacts
-dist/
-build/
-
-# Editor/IDE files
-.vscode/
-.idea/
+# Logs and temp files
+*.log
+*.tmp
 *.swp
 *.swo
-*.tmp
-
-# Logs
-*.log
-
-# Coverage
-coverage/
-htmlcov/
-.coverage
 
 # Environment
 .env
 .env.local
 *.env.*
 
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
 # System files
 .DS_Store
 Thumbs.db
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Gradle
+.gradle/
 
 # Compressed files
 *.zip
