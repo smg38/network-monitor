@@ -6,496 +6,313 @@
 
 set -euo pipefail  # Строгий режим
 
-# Функция цветов (дублируем из config)
-setup_colors() {
-    if [ -t 1 ]; then
-        export RED='\033[0;31m'
-        export GREEN='\033[0;32m'
-        export YELLOW='\033[0;33m'
-        export BLUE='\033[0;34m'
-        export MAGENTA='\033[0;35m'
-        export CYAN='\033[0;36m'
-        export WHITE='\033[0;37m'
-        export BOLD='\033[1m'
-        export NC='\033[0m'
-    else
-        unset RED GREEN YELLOW BLUE MAGENTA CYAN WHITE BOLD NC
-    fi
-}
-
-setup_colors
-
-# Функция логирования
-log() {
-    local level="$1"
-    local message="$2"
-    local timestamp
-    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
-    # Проверяем уровень логирования
-    case "$LOG_LEVEL" in
-        "DEBUG") ;;
-        "INFO")  [ "$level" = "DEBUG" ] && return ;;
-        "WARN")  [[ "$level" =~ ^(DEBUG|INFO)$ ]] && return ;;
-        "ERROR") [[ "$level" =~ ^(DEBUG|INFO|WARN)$ ]] && return ;;
-    esac
-    
-    # Запись в файл
-    echo "${timestamp} [${level}] ${message}" >> "$LOG_FILE"
-    
-    # В journald через stdout (для systemd)
-    if [ "$level" = "ERROR" ]; then
-        echo >&2 "${timestamp} [${level}] ${message}"
-    else
-        echo "${timestamp} [${level}] ${message}"
-    fi
-}
-
-# Загружаем базовый конфиг + правила из БД (v1.6.4)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 1. Загружаем ПОЛНЫЙ конфиг (а не env!)
-source "${SCRIPT_DIR}/nm-config.sh"
-
-# 2. Гарантируем объявление массивов (защита от -u)
-# Гарантия существования массивов (без поломки)
-declare -A COLLECT_RULES=()
-declare -A AGGREGATE_RULES=()
-declare -A CLEANUP_RULES=()
-# declare -A COLLECT_RULES=("${COLLECT_RULES[@]:-}")
-# declare -A AGGREGATE_RULES=("${AGGREGATE_RULES[@]:-}")
-# declare -A CLEANUP_RULES=("${CLEANUP_RULES[@]:-}")
-
-# 3. Принудительная загрузка правил
-load_config_rules db
-
-# 4. Валидация
-if [ ${#COLLECT_RULES[@]} -eq 0 ]; then
-    echo "❌ CRITICAL: COLLECT_RULES пуст → демон не может работать"
+# Подключаем общую библиотеку с функциями
+if [ -f "${SCRIPT_DIR}/nm-lib.sh" ]; then
+    source "${SCRIPT_DIR}/nm-lib.sh"
+else
+    echo "❌ CRITICAL: nm-lib.sh не найден в ${SCRIPT_DIR}"
     exit 1
 fi
 
-# Базовые переменные из env (systemd)
-# if [ -f "${SCRIPT_DIR}/nm-config.env" ]; then
-#     # shellcheck disable=SC1091
-#     source "${SCRIPT_DIR}/nm-config.env"
-#     log "INFO" "Загружен базовый конфиг из nm-config.env"
-# else
-#     log "ERROR" "nm-config.env не найден: ${SCRIPT_DIR}/nm-config.env"
-#     exit 1
-# fi
+# Загружаем базовый конфиг + правила из БД (v1.7.0)
+source "${SCRIPT_DIR}/nm-config.sh"
 
-# Загружаем динамические правила из БД (функция из nm-config.sh)
-# shellcheck disable=SC1091
-#source "${SCRIPT_DIR}/nm-config.sh"     # Локальная копия в директории демона (автозагрузка правил)
+# Гарантируем объявление массивов (защита от -u)
+declare -A COLLECT_RULES=("${COLLECT_RULES[@]:-}")
+declare -A AGGREGATE_RULES=("${AGGREGATE_RULES[@]:-}")
+declare -A CLEANUP_RULES=("${CLEANUP_RULES[@]:-}")
+
+# Принудительная загрузка правил
+load_config_rules db
+
+# Валидация
+if [ ${#COLLECT_RULES[@]} -eq 0 ]; then
+    log "ERROR" "CRITICAL: COLLECT_RULES пуст → демон не может работать"
+    exit 1
+fi
 
 collect_count=${#COLLECT_RULES[@]}
 aggregate_count=${#AGGREGATE_RULES[@]}
-log "INFO" "Демон v1.6.4: config_rules загружены ($collect_count collect, $aggregate_count aggregate)"
+log "INFO" "Демон v1.7.0: config_rules загружены ($collect_count collect, $aggregate_count aggregate)"
 
 # Функция для получения последнего запуска задачи из БД
 get_last_run() {
     local task_key="$1"
     local result
     
-    result=$(sqlite_safe "$DB_PATH" "SELECT last_run FROM task_last_run WHERE task_key = '$task_key';") || return 1
-    echo "$result"
+    result=$(sqlite_safe "$DB_PATH" "SELECT last_run FROM task_schedule WHERE task_key='${task_key}';") || return 1
+    
+    if [ -n "$result" ]; then
+        echo "$result"
+    else
+        echo "0"
+    fi
 }
 
-# Функция для обновления времени последнего запуска
+# Обновление времени последнего запуска
 update_last_run() {
     local task_key="$1"
+    local timestamp
+    timestamp=$(get_timestamp)
     
-    sqlite_safe "$DB_PATH" "INSERT INTO task_last_run (task_key, last_run, updated_at) 
-VALUES ('$task_key', datetime('now'), datetime('now'))
-ON CONFLICT(task_key) DO UPDATE SET 
-    last_run = datetime('now'),
-    updated_at = datetime('now');" || return 1
+    sqlite_safe "$DB_PATH" "INSERT OR REPLACE INTO task_schedule (task_key, last_run) VALUES ('${task_key}', ${timestamp});" || return 1
 }
 
-# Функция проверки необходимости запуска задачи
-need_to_run() {
-    local task_type="$1"      # collect, aggregate, cleanup
-    local task_key="$2"       # ключ задачи (например, "5" для collect или "raw:300" для aggregate)
-    local interval="$3"       # интервал в секундах
-    local last_run
+# Проверка необходимости запуска задачи
+should_run_task() {
+    local task_key="$1"
+    local interval="$2"
+    local last_run current_time elapsed
     
-    last_run=$(get_last_run "${task_type}:${task_key}")
+    last_run=$(get_last_run "$task_key") || last_run=0
+    current_time=$(get_timestamp)
+    elapsed=$((current_time - last_run))
     
-    if [ -z "$last_run" ]; then
-        log "DEBUG" "Задача ${task_type}:${task_key} никогда не запускалась"
-        return 0  # Никогда не запускалась - нужно запустить
-    fi
-    
-    # Конвертируем время в секунды с эпохи
-    local last_run_epoch
-    last_run_epoch=$(date -d "$last_run" +%s 2>/dev/null || date -d "$last_run UTC" +%s)
-    local now_epoch
-    now_epoch=$(date +%s)
-    local diff
-    diff=$((now_epoch - last_run_epoch))
-    
-    if [ "$diff" -ge "$interval" ]; then
-        log "DEBUG" "Задача ${task_type}:${task_key} требует запуска (прошло ${diff}с, интервал ${interval}с)"
-        return 0
-    else
-        log "DEBUG" "Задача ${task_type}:${task_key} еще не пора (прошло ${diff}с, интервал ${interval}с)"
-        return 1
-    fi
+    [ "$elapsed" -ge "$interval" ]
 }
 
-# Функция сбора сырых данных с интерфейса
-collect_interface_data() {
-    local interface="$1"
-    local timestamp="$2"
-    local data_type="raw"
+# Сбор данных по правилам collect
+do_collect() {
+    local rule_key="$1"
+    local desc_interval="$2"
     
-    log "DEBUG" "Сбор данных с интерфейса $interface"
+    local description interval
+    description=$(echo "$desc_interval" | cut -d'|' -f1)
+    interval=$(echo "$desc_interval" | cut -d'|' -f2)
     
-    # Читаем данные из /proc/net/dev (используем встроенный read вместо grep+awk)
-    while IFS=: read -r iface stats; do
-        if [[ "$iface" == *"$interface"* ]]; then
-            # Парсим статистику через read (быстрее чем awk)
-            read -ra fields <<< "$stats"
-            rx_bytes="${fields[0]}"
-            rx_packets="${fields[1]}"
-            rx_errors="${fields[2]}"
-            rx_drop="${fields[3]}"
-            tx_bytes="${fields[8]}"
-            tx_packets="${fields[9]}"
-            tx_errors="${fields[10]}"
-            tx_drop="${fields[11]}"
-            break
-        fi
+    log "INFO" "Выполнение сбора данных: $rule_key ($description)"
+    
+    case "$rule_key" in
+        5|60)
+            collect_interface_stats "$rule_key"
+            ;;
+        *)
+            log "WARN" "Неизвестный тип правила сбора: $rule_key"
+            return 1
+            ;;
+    esac
+    
+    update_last_run "$rule_key"
+}
+
+# Сбор статистики интерфейса
+collect_interface_stats() {
+    local rule_key="$1"
+    local iface="${MAIN_IFACE}"
+    local timestamp rx_bytes tx_bytes rx_packets tx_packets
+    
+    timestamp=$(get_timestamp)
+    
+    # Чтение статистики из /proc/net/dev (bash only)
+    while IFS=: read -r name stats; do
+        [[ "$name" != *"$iface"* ]] && continue
+        
+        # Разбор полей через read вместо awk
+        read -ra fields <<< "$stats"
+        rx_bytes="${fields[0]}"
+        rx_packets="${fields[1]}"
+        tx_bytes="${fields[8]}"
+        tx_packets="${fields[9]}"
+        
+        # Сохранение в БД
+        sqlite_safe "$DB_PATH" "INSERT INTO interface_stats (timestamp, iface, rx_bytes, tx_bytes, rx_packets, tx_packets) VALUES (${timestamp}, '${iface}', ${rx_bytes}, ${tx_bytes}, ${rx_packets}, ${tx_packets});" || return 1
+        
+        log "DEBUG" "Собрана статистика интерфейса ${iface}: rx=${rx_bytes}, tx=${tx_bytes}"
+        break
     done < /proc/net/dev
-    
-    if [ -z "$rx_bytes" ]; then
-        log "WARN" "Интерфейс $interface не найден в /proc/net/dev"
-        return 1
-    fi
-    
-    # Вставляем в БД (параметризованный запрос для защиты от SQL-инъекций)
-    sqlite_safe "$DB_PATH" "INSERT INTO interfaces_stats (data_type, timestamp, interface, rx_bytes, tx_bytes, rx_packets, tx_packets, rx_errors, tx_errors, rx_drop, tx_drop) VALUES ('$data_type', '$timestamp', '$interface', $rx_bytes, $tx_bytes, $rx_packets, $tx_packets, $rx_errors, $tx_errors, $rx_drop, $tx_drop);" || return 1
-    
-    log "DEBUG" "Данные $interface сохранены: RX=$rx_bytes TX=$tx_bytes"
 }
 
-# Функция сбора данных WireGuard клиентов
-collect_wg_data() {
-    local interface="$1"
-    local timestamp="$2"
-    local data_type="raw"
+# Сбор статистики WireGuard
+collect_wg_stats() {
+    local rule_key="$1"
+    local iface="${WG_IFACE}"
+    local timestamp peer_pubkey rx_bytes tx_bytes last_handshake
     
-    log "DEBUG" "Сбор данных WireGuard с $interface"
+    [ -z "$iface" ] && return 0
     
-    # Получаем список пиров
-    local peers_output
-    if ! peers_output=$(wg show "$interface" dump 2>/dev/null); then
-        log "WARN" "Не удалось получить данные WireGuard с $interface"
-        return 1
-    fi
+    timestamp=$(get_timestamp)
     
-    # Парсим вывод wg show dump (используем process substitution для сохранения переменных)
-    # Формат: private_key public_key endpoint allowed_ips latest_handshake transfer_rx transfer_tx persistent_keepalive
-    while IFS=$'\t' read -r _ public_key endpoint allowed_ips handshake_seconds rx_bytes tx_bytes _; do
-        # Пропускаем первую строку (приватный ключ интерфейса)
-        [[ "$public_key" == "private_key" ]] && continue
-        
-        # Получаем IP из allowed_ips (первый /32) через bash regex
-        peer_ip=""
-        if [[ "$allowed_ips" =~ ([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}) ]]; then
-            peer_ip="${BASH_REMATCH[1]}"
+    # Получение списка пиров через wg show (без awk)
+    local current_peer=""
+    while IFS= read -r line; do
+        # Парсинг вывода wg show
+        if [[ "$line" =~ ^peer:[[:space:]]*(.+)$ ]]; then
+            current_peer="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ transfer:[[:space:]]*([0-9]+)[[:space:]]+([0-9]+) ]]; then
+            rx_bytes="${BASH_REMATCH[1]}"
+            tx_bytes="${BASH_REMATCH[2]}"
+            
+            # Сохранение в БД
+            sqlite_safe "$DB_PATH" "INSERT INTO wg_peers_stats (timestamp, iface, peer_pubkey, rx_bytes, tx_bytes) VALUES (${timestamp}, '${iface}', '${current_peer}', ${rx_bytes}, ${tx_bytes});" || return 1
+            
+            log "DEBUG" "Собрана статистика WG пира ${current_peer}: rx=${rx_bytes}, tx=${tx_bytes}"
+        elif [[ "$line" =~ latest[[:space:]]+handshake:[[:space:]]+(.+)$ ]]; then
+            last_handshake="${BASH_REMATCH[1]}"
         fi
-        
-        # Получаем имя клиента из файла конфигурации
-        peer_name=""
-        if [ -n "$peer_ip" ]; then
-            # Ищем в /etc/wireguard/clients/*.conf
-            local client_conf
-            client_conf=$(grep -l "$peer_ip" /etc/wireguard/clients/*.conf 2>/dev/null | head -1) || true
-            if [ -n "$client_conf" ]; then
-                peer_name=$(basename "$client_conf" .conf)
-            fi
-        fi
-        
-        # Если не нашли по IP, пробуем найти по публичному ключу
-        if [ -z "$peer_name" ] && [ -n "$public_key" ]; then
-            local client_conf
-            client_conf=$(grep -l "$public_key" /etc/wireguard/clients/*.conf 2>/dev/null | head -1) || true
-            if [ -n "$client_conf" ]; then
-                peer_name=$(basename "$client_conf" .conf)
-            fi
-        fi
-        
-        # Если имя не найдено, используем первые 8 символов ключа
-        if [ -z "$peer_name" ]; then
-            peer_name="${public_key:0:8}"
-        fi
-        
-        # Вставляем в БД
-        sqlite_safe "$DB_PATH" "INSERT INTO wg_peers_stats (data_type, timestamp, peer_key, peer_ip, peer_name, rx_bytes, tx_bytes, handshake_seconds) VALUES ('$data_type', '$timestamp', '$public_key', '$peer_ip', '$peer_name', $rx_bytes, $tx_bytes, $handshake_seconds);" || true
-        
-        log "DEBUG" "Данные клиента $peer_name сохранены: RX=$rx_bytes TX=$tx_bytes"
-    done <<< "$peers_output"
+    done < <(wg show "$iface" 2>/dev/null || true)
 }
 
-# Функция выполнения правил сбора
-execute_collect_rules() {
-    local timestamp="$1"
+# Агрегация данных
+do_aggregate() {
+    local rule_key="$1"
+    local desc_window_interval="$2"
     
-    for interval in "${!COLLECT_RULES[@]}"; do
-        if need_to_run "collect" "$interval" "$interval"; then
-            log "INFO" "Выполнение сбора данных (интервал: ${interval}с)"
-            
-            local start_time
-            start_time=$(get_timestamp)
-            
-            # Сбор основного интерфейса
-            if [ -n "$MAIN_IFACE" ]; then
-                collect_interface_data "$MAIN_IFACE" "$timestamp" || true
-            fi
-            
-            # Сбор WireGuard интерфейса
-            if [ -n "$WG_IFACE" ]; then
-                collect_wg_data "$WG_IFACE" "$timestamp" || true
-            fi
-            
-            local end_time
-            end_time=$(get_timestamp)
-            local duration=$((end_time - start_time))
-            
-            # Логируем выполнение
-            sqlite_safe "$DB_PATH" "INSERT INTO tasks_log (task_type, rule_key, started_at, finished_at, status, records_processed) VALUES ('collect', '$interval', '$timestamp', datetime('now'), 'success', 1);" || true
-            
-            update_last_run "collect:$interval"
-            log "INFO" "Сбор данных завершен за ${duration}с"
-        fi
-    done
+    local description window interval
+    description=$(echo "$desc_window_interval" | cut -d'|' -f1)
+    window=$(echo "$desc_window_interval" | cut -d'|' -f2)
+    interval=$(echo "$desc_window_interval" | cut -d'|' -f3)
+    
+    log "INFO" "Выполнение агрегации: $rule_key (окно=${window}s, интервал=${interval}s)"
+    
+    # Определяем тип агрегации по ключу правила
+    case "$rule_key" in
+        agg_5min*|agg_hour*)
+            aggregate_interface_data "$window"
+            ;;
+        raw:*)
+            aggregate_wg_data "$window"
+            ;;
+        *)
+            log "WARN" "Неизвестный тип агрегации: $rule_key"
+            return 1
+            ;;
+    esac
+    
+    update_last_run "$rule_key"
 }
 
-# Функция расчета скорости (дельты) между замерами
-calculate_rates() {
-    local interface="$1"
-    local start_time="$2"
-    local end_time="$3"
+# Агрегация данных интерфейса
+aggregate_interface_data() {
+    local window="${1:-300}"
+    local current_ts start_ts
     
-    sqlite_safe "$DB_PATH" "WITH interface_data AS (SELECT timestamp, rx_bytes, tx_bytes, LAG(rx_bytes) OVER (ORDER BY timestamp) as prev_rx, LAG(tx_bytes) OVER (ORDER BY timestamp) as prev_tx, LAG(timestamp) OVER (ORDER BY timestamp) as prev_time FROM interfaces_stats WHERE interface = '$interface' AND data_type = 'raw' AND timestamp BETWEEN '$start_time' AND '$end_time' ORDER BY timestamp) SELECT AVG((rx_bytes - prev_rx) / strftime('%s', timestamp) - strftime('%s', prev_time)) as avg_rx_rate, AVG((tx_bytes - prev_tx) / strftime('%s', timestamp) - strftime('%s', prev_time)) as avg_tx_rate, MAX((rx_bytes - prev_rx) / strftime('%s', timestamp) - strftime('%s', prev_time)) as max_rx_rate, MAX((tx_bytes - prev_tx) / strftime('%s', timestamp) - strftime('%s', prev_time)) as max_tx_rate, MIN((rx_bytes - prev_rx) / strftime('%s', timestamp) - strftime('%s', prev_time)) as min_rx_rate, MIN((tx_bytes - prev_tx) / strftime('%s', timestamp) - strftime('%s', prev_time)) as min_tx_rate, COUNT(*) as samples FROM interface_data WHERE prev_rx IS NOT NULL;" || true
+    current_ts=$(get_timestamp)
+    start_ts=$((current_ts - window))
+    
+    # Агрегация через SQL (AVG, SUM, MIN, MAX)
+    sqlite_safe "$DB_PATH" "
+        INSERT INTO interface_stats_agg (timestamp, iface, avg_rx_bytes, avg_tx_bytes, sum_rx_bytes, sum_tx_bytes, min_rx_bytes, max_rx_bytes)
+        SELECT 
+            ${current_ts},
+            iface,
+            AVG(rx_bytes),
+            AVG(tx_bytes),
+            SUM(rx_bytes),
+            SUM(tx_bytes),
+            MIN(rx_bytes),
+            MAX(rx_bytes)
+        FROM interface_stats 
+        WHERE timestamp >= ${start_ts} AND timestamp <= ${current_ts}
+        GROUP BY iface;
+    " || return 1
+    
+    log "DEBUG" "Агрегация данных интерфейса завершена (окно=${window}s)"
 }
 
-# Функция агрегации данных интерфейсов
-aggregate_interfaces_data() {
-    local input_type="$1"
-    local output_type="$2"
-    local window="$3"
-    local end_time="$4"
-    local start_time
-    start_time=$(date -d "$end_time - $window seconds" "+%Y-%m-%d %H:%M:%S")
-    
-    log "DEBUG" "Агрегация $input_type -> $output_type за период $start_time - $end_time"
-    
-    # Для каждого интерфейса
-    local interfaces=("$MAIN_IFACE")
-    [ -n "$WG_IFACE" ] && interfaces+=("$WG_IFACE")
-    
-    for interface in "${interfaces[@]}"; do
-        if [ -z "$interface" ]; then
-            continue
-        fi
-        
-        # Получаем статистику
-        local stats
-        stats=$(sqlite_safe "$DB_PATH" "WITH data_window AS (SELECT timestamp, rx_bytes, tx_bytes, rx_packets, tx_packets, rx_errors, tx_errors, rx_drop, tx_drop FROM interfaces_stats WHERE interface = '$interface' AND data_type = '$input_type' AND timestamp BETWEEN '$start_time' AND '$end_time' ORDER BY timestamp), rates AS (SELECT (rx_bytes - LAG(rx_bytes) OVER (ORDER BY timestamp)) / (strftime('%s', timestamp) - strftime('%s', LAG(timestamp) OVER (ORDER BY timestamp))) as rx_rate, (tx_bytes - LAG(tx_bytes) OVER (ORDER BY timestamp)) / (strftime('%s', timestamp) - strftime('%s', LAG(timestamp) OVER (ORDER BY timestamp))) as tx_rate FROM data_window) SELECT AVG(rx_bytes) as avg_rx, AVG(tx_bytes) as avg_tx, AVG(rx_packets) as avg_rx_packets, AVG(tx_packets) as avg_tx_packets, SUM(rx_errors) as total_rx_errors, SUM(tx_errors) as total_tx_errors, SUM(rx_drop) as total_rx_drop, SUM(tx_drop) as total_tx_drop, COUNT(*) as sample_count, AVG(rx_rate) as avg_rx_rate, AVG(tx_rate) as avg_tx_rate, MAX(rx_rate) as max_rx_rate, MAX(tx_rate) as max_tx_rate, MIN(rx_rate) as min_rx_rate, MIN(tx_rate) as min_tx_rate FROM data_window, rates WHERE rates.rowid = data_window.rowid;") || return 1
-        
-        # Парсим результат
-        # shellcheck disable=SC2034
-        IFS='|' read -r avg_rx avg_tx avg_rx_packets avg_tx_packets \
-            total_rx_errors total_tx_errors total_rx_drop total_tx_drop \
-            sample_count avg_rx_rate avg_tx_rate max_rx_rate max_tx_rate \
-            min_rx_rate min_tx_rate <<< "$stats"
-        
-        # Сохраняем агрегированную запись
-        if [ -n "$avg_rx" ] && [ "$avg_rx" != "NULL" ]; then
-            sqlite_safe "$DB_PATH" "INSERT INTO interfaces_stats (data_type, timestamp, interface, rx_bytes, tx_bytes, rx_packets, tx_packets, rx_errors, tx_errors, rx_drop, tx_drop, samples_count, min_rx_rate, max_rx_rate, min_tx_rate, max_tx_rate) VALUES ('$output_type', '$end_time', '$interface', $avg_rx, $avg_tx, $avg_rx_packets, $avg_tx_packets, $total_rx_errors, $total_tx_errors, $total_rx_drop, $total_tx_drop, $sample_count, $min_rx_rate, $max_rx_rate, $min_tx_rate, $max_tx_rate);" || return 1
-            log "DEBUG" "Агрегация $interface сохранена: samples=$sample_count"
-        fi
-    done
-}
-
-# Функция агрегации данных WireGuard клиентов
+# Агрегация данных WireGuard
 aggregate_wg_data() {
-    local input_type="$1"
-    local output_type="$2"
-    local window="$3"
-    local end_time="$4"
-    local start_time
-    start_time=$(date -d "$end_time - $window seconds" "+%Y-%m-%d %H:%M:%S")
+    local window="${1:-300}"
+    local current_ts start_ts
     
-    log "DEBUG" "Агрегация WG $input_type -> $output_type за период $start_time - $end_time"
+    current_ts=$(get_timestamp)
+    start_ts=$((current_ts - window))
     
-    # Получаем уникальных клиентов (используем process substitution вместо pipe)
-    local peers
-    peers=$(sqlite_safe "$DB_PATH" "SELECT DISTINCT peer_key, peer_name, peer_ip FROM wg_peers_stats WHERE data_type = '$input_type' AND timestamp BETWEEN '$start_time' AND '$end_time';") || return 1
+    sqlite_safe "$DB_PATH" "
+        INSERT INTO wg_peers_stats_agg (timestamp, iface, peer_pubkey, avg_rx_bytes, avg_tx_bytes, sum_rx_bytes, sum_tx_bytes)
+        SELECT 
+            ${current_ts},
+            iface,
+            peer_pubkey,
+            AVG(rx_bytes),
+            AVG(tx_bytes),
+            SUM(rx_bytes),
+            SUM(tx_bytes)
+        FROM wg_peers_stats 
+        WHERE timestamp >= ${start_ts} AND timestamp <= ${current_ts}
+        GROUP BY iface, peer_pubkey;
+    " || return 1
     
-    while IFS='|' read -r peer_key peer_name peer_ip; do
-        if [ -z "$peer_key" ]; then
-            continue
-        fi
-        
-        # Получаем статистику по клиенту
-        local stats
-        stats=$(sqlite_safe "$DB_PATH" "WITH data_window AS (SELECT timestamp, rx_bytes, tx_bytes, handshake_seconds FROM wg_peers_stats WHERE peer_key = '$peer_key' AND data_type = '$input_type' AND timestamp BETWEEN '$start_time' AND '$end_time' ORDER BY timestamp), rates AS (SELECT (rx_bytes - LAG(rx_bytes) OVER (ORDER BY timestamp)) / (strftime('%s', timestamp) - strftime('%s', LAG(timestamp) OVER (ORDER BY timestamp))) as rx_rate, (tx_bytes - LAG(tx_bytes) OVER (ORDER BY timestamp)) / (strftime('%s', timestamp) - strftime('%s', LAG(timestamp) OVER (ORDER BY timestamp))) as tx_rate FROM data_window) SELECT AVG(rx_bytes) as avg_rx, AVG(tx_bytes) as avg_tx, AVG(handshake_seconds) as avg_handshake, COUNT(*) as sample_count, AVG(rx_rate) as avg_rx_rate, AVG(tx_rate) as avg_tx_rate, MAX(rx_rate) as max_rx_rate, MAX(tx_rate) as max_tx_rate, MIN(rx_rate) as min_rx_rate, MIN(tx_rate) as min_tx_rate FROM data_window, rates WHERE rates.rowid = data_window.rowid;") || continue
-        
-        # Парсим результат
-        # shellcheck disable=SC2034
-        IFS='|' read -r avg_rx avg_tx avg_handshake sample_count \
-            avg_rx_rate avg_tx_rate max_rx_rate max_tx_rate \
-            min_rx_rate min_tx_rate <<< "$stats"
-        
-        # Сохраняем агрегированную запись
-        if [ -n "$avg_rx" ] && [ "$avg_rx" != "NULL" ]; then
-            sqlite_safe "$DB_PATH" "INSERT INTO wg_peers_stats (data_type, timestamp, peer_key, peer_ip, peer_name, rx_bytes, tx_bytes, handshake_seconds, samples_count, min_rx_rate, max_rx_rate, min_tx_rate, max_tx_rate) VALUES ('$output_type', '$end_time', '$peer_key', '$peer_ip', '$peer_name', $avg_rx, $avg_tx, $avg_handshake, $sample_count, $min_rx_rate, $max_rx_rate, $min_tx_rate, $max_tx_rate);" || continue
-            log "DEBUG" "Агрегация клиента $peer_name сохранена: samples=$sample_count"
-        fi
-    done <<< "$peers"
+    log "DEBUG" "Агрегация данных WireGuard завершена (окно=${window}s)"
 }
 
-# Функция выполнения правил агрегации
-execute_aggregate_rules() {
-    local timestamp="$1"
+# Очистка старых данных
+do_cleanup() {
+    local data_type="$1"
+    local retention_days="$2"
+    local cutoff_ts current_ts
     
-    for rule in "${!AGGREGATE_RULES[@]}"; do
-        # rule = "raw:300" (входной_тип:интервал_запуска)
-        local input_type
-        input_type=$(echo "$rule" | cut -d: -f1)
-        local run_interval
-        run_interval=$(echo "$rule" | cut -d: -f2)
-        local output_config="${AGGREGATE_RULES[$rule]}"  # "agg_5min:300:описание"
-        
-        local output_type
-        output_type=$(echo "$output_config" | cut -d: -f1)
-        local window
-        window=$(echo "$output_config" | cut -d: -f2)
-        local description
-        description=$(echo "$output_config" | cut -d: -f3)
-        
-        if need_to_run "aggregate" "$rule" "$run_interval"; then
-            log "INFO" "Выполнение агрегации: $description"
-            
-            local start_agg
-            start_agg=$(date +%s)
-            
-            # Агрегация интерфейсов
-            aggregate_interfaces_data "$input_type" "$output_type" "$window" "$timestamp"
-            
-            # Агрегация WireGuard клиентов (если есть)
-            if [ -n "$WG_IFACE" ]; then
-                aggregate_wg_data "$input_type" "$output_type" "$window" "$timestamp"
-            fi
-            
-            local end_agg
-            end_agg=$(get_timestamp)
-            local duration
-            duration=$((end_agg - start_agg))
-            
-            # Логируем выполнение
-            sqlite_safe "$DB_PATH" "INSERT INTO tasks_log (task_type, rule_key, started_at, finished_at, status) VALUES ('aggregate', '$rule', '$timestamp', datetime('now'), 'success');" || true
-            
-            update_last_run "aggregate:$rule"
-            log "INFO" "Агрегация завершена за ${duration}с"
-        fi
-    done
-}
-
-# Функция очистки старых данных
-execute_cleanup_rules() {
-    local timestamp="$1"
+    current_ts=$(get_timestamp)
+    cutoff_ts=$((current_ts - (retention_days * 86400)))
     
-    for data_type in "${!CLEANUP_RULES[@]}"; do
-        local retention_days="${CLEANUP_RULES[$data_type]}"
-        local cutoff_date
-        cutoff_date=$(date -d "$retention_days days ago" "+%Y-%m-%d %H:%M:%S")
-        
-        # Проверяем, нужно ли запускать очистку (раз в час)
-        if need_to_run "cleanup" "$data_type" "3600"; then
-            log "INFO" "Очистка $data_type старше $retention_days дней (до $cutoff_date)"
-            
-            # Очистка interfaces_stats
-            local deleted_if
-            deleted_if=$(sqlite_safe "$DB_PATH" "DELETE FROM interfaces_stats WHERE data_type = '$data_type' AND timestamp < '$cutoff_date'; SELECT changes();") || deleted_if=0
-            
-            # Очистка wg_peers_stats
-            local deleted_wg=0
-            if [ -n "$WG_IFACE" ]; then
-                deleted_wg=$(sqlite_safe "$DB_PATH" "DELETE FROM wg_peers_stats WHERE data_type = '$data_type' AND timestamp < '$cutoff_date'; SELECT changes();") || deleted_wg=0
-            fi
-            
-            local total_deleted
-            total_deleted=$((deleted_if + deleted_wg))
-            
-            # Логируем выполнение
-            sqlite_safe "$DB_PATH" "INSERT INTO tasks_log (task_type, rule_key, started_at, finished_at, status, records_processed) VALUES ('cleanup', '$data_type', '$timestamp', datetime('now'), 'success', $total_deleted);" || true
-            
-            update_last_run "cleanup:$data_type"
-            log "INFO" "Очистка завершена, удалено записей: $total_deleted"
-        fi
-    done
+    log "INFO" "Очистка данных типа '$data_type' старше ${retention_days} дней"
+    
+    case "$data_type" in
+        raw)
+            sqlite_safe "$DB_PATH" "DELETE FROM interface_stats WHERE timestamp < ${cutoff_ts};" || return 1
+            sqlite_safe "$DB_PATH" "DELETE FROM wg_peers_stats WHERE timestamp < ${cutoff_ts};" || return 1
+            ;;
+        agg)
+            sqlite_safe "$DB_PATH" "DELETE FROM interface_stats_agg WHERE timestamp < ${cutoff_ts};" || return 1
+            sqlite_safe "$DB_PATH" "DELETE FROM wg_peers_stats_agg WHERE timestamp < ${cutoff_ts};" || return 1
+            ;;
+        *)
+            log "WARN" "Неизвестный тип данных для очистки: $data_type"
+            return 1
+            ;;
+    esac
+    
+    log "DEBUG" "Очистка завершена, удалены данные старше $(date -d "@${cutoff_ts}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo 'N/A')"
 }
 
-# Функция обработки сигналов
-cleanup() {
-    log "INFO" "Получен сигнал завершения, останавливаем демон"
-    exit 0
-}
-
-# Главный цикл демона
+# Основной цикл демона
 main_loop() {
     log "INFO" "Демон мониторинга сети запущен"
-    log "INFO" "Основной интерфейс: $MAIN_IFACE"
-    log "INFO" "WireGuard интерфейс: ${WG_IFACE:-не используется}"
+    log "INFO" "Основной интерфейс: ${MAIN_IFACE}"
+    log "INFO" "WireGuard интерфейс: ${WG_IFACE:-не настроен}"
     log "INFO" "Интервал проверки: ${CHECK_INTERVAL}с"
     
-    trap cleanup SIGTERM SIGINT
+    local iteration=0
     
     while true; do
-    local current_time
-    current_time=$(date "+%Y-%m-%d %H:%M:%S")
+        iteration=$((iteration + 1))
+        log "DEBUG" "=== Итерация ${iteration} ==="
         
-        # Выполняем сбор данных
-        execute_collect_rules "$current_time"
+        # Проверка правил сбора (collect)
+        for rule_key in "${!COLLECT_RULES[@]}"; do
+            local desc_interval="${COLLECT_RULES[$rule_key]}"
+            local interval
+            interval=$(echo "$desc_interval" | cut -d'|' -f2)
+            
+            if should_run_task "$rule_key" "$interval"; then
+                do_collect "$rule_key" "$desc_interval" || log "ERROR" "Ошибка сбора данных: $rule_key"
+            fi
+        done
         
-        # Выполняем агрегацию
-        execute_aggregate_rules "$current_time"
+        # Проверка правил агрегации (aggregate)
+        for rule_key in "${!AGGREGATE_RULES[@]}"; do
+            local desc_window_interval="${AGGREGATE_RULES[$rule_key]}"
+            local interval
+            interval=$(echo "$desc_window_interval" | cut -d'|' -f3)
+            
+            if should_run_task "$rule_key" "$interval"; then
+                do_aggregate "$rule_key" "$desc_window_interval" || log "ERROR" "Ошибка агрегации: $rule_key"
+            fi
+        done
         
-        # Выполняем очистку
-        execute_cleanup_rules "$current_time"
+        # Проверка правил очистки (cleanup) - раз в час
+        if [ $((iteration % 360)) -eq 0 ]; then
+            for data_type in "${!CLEANUP_RULES[@]}"; do
+                local retention="${CLEANUP_RULES[$data_type]}"
+                do_cleanup "$data_type" "$retention" || log "ERROR" "Ошибка очистки: $data_type"
+            done
+        fi
         
-        # Ждем следующий цикл
+        # Сон до следующей проверки
         sleep "$CHECK_INTERVAL"
     done
 }
 
-# Запуск демона
-main() {
-    # Проверяем, не запущен ли уже демон
-    local pid_file="/var/run/nm-daemon.pid"
-    if [ -f "$pid_file" ]; then
-    local old_pid
-    old_pid=$(cat "$pid_file")
-        if kill -0 "$old_pid" 2>/dev/null; then
-            log "ERROR" "Демон уже запущен (PID: $old_pid)"
-            exit 1
-        fi
-    fi
-    
-    # Создаем pid файл
-    echo $$ > "$pid_file"
-    
-    # Запускаем основной цикл
-    main_loop
-    
-    # Удаляем pid файл при выходе
-    rm -f "$pid_file"
-}
-
-# Запуск
-main "$@"
+# Запуск основного цикла
+main_loop
