@@ -1,6 +1,6 @@
 #!/bin/bash
 # nm-daemon.sh - Демон сбора и агрегации данных сетевого мониторинга
-# Версия: 1.7.2
+# Версия: 1.7.3
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запускается как systemd сервис
 
@@ -27,15 +27,15 @@ declare -A CLEANUP_RULES=()
 # Явно загружаем правила из БД
 load_config_rules db
 
-# Валидация
-if [ ${#COLLECT_RULES[@]} -eq 0 ]; then
+# Валидация - безопасная проверка для set -u
+if [ -z "${COLLECT_RULES[*]+isset}" ] || [ ${#COLLECT_RULES[@]} -eq 0 ]; then
     log "ERROR" "CRITICAL: COLLECT_RULES пуст → демон не может работать"
     exit 1
 fi
 
 collect_count=${#COLLECT_RULES[@]}
 aggregate_count=${#AGGREGATE_RULES[@]}
-log "INFO" "Демон v1.7.2: config_rules загружены ($collect_count collect, $aggregate_count aggregate)"
+log "INFO" "Демон v1.7.3: config_rules загружены ($collect_count collect, $aggregate_count aggregate)"
 
 # Функция для получения последнего запуска задачи из БД
 get_last_run() {
