@@ -1,28 +1,12 @@
 #!/bin/bash
-# nm-config.sh - Основной bash-конфиг для разработки/установки (Версия 1.7.0)
+# nm-config.sh - Основной bash-конфиг для разработки/установки (Версия 1.7.1)
 # Используется: source в nm-install.sh, nm-tests.sh
 # Правила динамически загружаются из БД config_rules (nm-config-rules.sql)
 # nm-config.env = копия только простых переменных для systemd
 # ✅ ИСПРАВЛЕНО: Добавлена setup_colors() + защита от отсутствия БД (2026-03-27)
+# ✅ v1.7.1: Удалена дублирующая setup_colors(), используется nm-lib.sh
 
 set -euo pipefail
-
-# ========================================
-# ЦВЕТА ТЕРМИНАЛА (новая функция)
-# ========================================
-setup_colors() {
-    if [ -t 1 ]; then
-        RED='\033[0;31m'
-        GREEN='\033[0;32m'
-        YELLOW='\033[1;33m'
-        BLUE='\033[0;34m'
-        BOLD='\033[1m'
-        NC='\033[0m'
-    else
-        RED='' GREEN='' YELLOW='' BLUE='' BOLD='' NC=''
-    fi
-    export RED GREEN YELLOW BLUE BOLD NC
-}
 
 # ========================================
 # ОСНОВНЫЕ ПЕРЕМЕННЫЕ (идентичны nm-config.env)
@@ -40,9 +24,6 @@ export LOG_MAX_SIZE=100
 export LOG_MAX_FILES=5
 export TOP_PEERS_DEFAULT=10
 export LIVE_REFRESH_INTERVAL=2
-
-# Автозагрузка цветов при source
-setup_colors
 
 # ========================================
 # ФУНКЦИИ ЗАГРУЗКИ ПРАВИЛ ИЗ БД (ЗАЩИЩЕНЫ)

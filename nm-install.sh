@@ -1,10 +1,10 @@
 #!/bin/bash
 # nm-install.sh - Установщик системы мониторинга сети  
-# Версия: 1.7.0
+# Версия: 1.7.1
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запуск: ./nm-install.sh (от root, sudo НЕ нужен)
 
-VERSION="1.7.0"
+VERSION="1.7.1"
 
 set -e  # Выход при ошибке
 

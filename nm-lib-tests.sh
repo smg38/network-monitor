@@ -1,6 +1,6 @@
 #!/bin/bash
 # nm-lib-tests.sh - Unit-тесты для библиотеки nm-lib.sh
-# Версия: 1.7.0
+# Версия: 1.7.1
 # Автор: TG: @smg38 smg38@yandex.ru
 # Использование: ./nm-lib-tests.sh
 
