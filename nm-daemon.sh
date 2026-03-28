@@ -1,6 +1,6 @@
 #!/bin/bash
 # nm-daemon.sh - Демон сбора и агрегации данных сетевого мониторинга
-# Версия: 1.7.1
+# Версия: 1.7.2
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запускается как systemd сервис
 
@@ -16,15 +16,15 @@ else
     exit 1
 fi
 
-# Загружаем базовый конфиг + правила из БД (v1.7.1)
+# Загружаем базовый конфиг (переменные, но НЕ правила)
 source "${SCRIPT_DIR}/nm-config.sh"
 
-# Гарантируем объявление массивов (защита от -u)
+# Объявляем массивы для правил
 declare -A COLLECT_RULES=()
 declare -A AGGREGATE_RULES=()
 declare -A CLEANUP_RULES=()
 
-# Принудительная загрузка правил
+# Явно загружаем правила из БД
 load_config_rules db
 
 # Валидация
@@ -35,7 +35,7 @@ fi
 
 collect_count=${#COLLECT_RULES[@]}
 aggregate_count=${#AGGREGATE_RULES[@]}
-log "INFO" "Демон v1.7.0: config_rules загружены ($collect_count collect, $aggregate_count aggregate)"
+log "INFO" "Демон v1.7.2: config_rules загружены ($collect_count collect, $aggregate_count aggregate)"
 
 # Функция для получения последнего запуска задачи из БД
 get_last_run() {

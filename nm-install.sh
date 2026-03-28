@@ -1,6 +1,6 @@
 #!/bin/bash
 # nm-install.sh - Установщик системы мониторинга сети  
-# Версия: 1.7.1
+# Версия: 1.7.2
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запуск: ./nm-install.sh (от root, sudo НЕ нужен)
 
@@ -206,22 +206,583 @@ CREATE TABLE interfaces_stats (
 
 -- Таблица для статистики WireGuard клиентов
 CREATE TABLE wg_peers_stats (
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    data_type TEXT NOT NULL,
-    timestamp DATETIME NOT NULL,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
     peer_key TEXT NOT NULL,
     peer_ip TEXT,
     peer_name TEXT,
-    rx_bytes INTEGER,
-    tx_bytes INTEGER,
-    handshake_seconds INTEGER,
-    samples_count INTEGER DEFAULT 1,
-    min_rx_rate INTEGER,
-    max_rx_rate INTEGER,
-    min_tx_rate INTEGER,
-    max_tx_rate INTEGER,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    data_type TEXT NOT NULL,
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    timestamp DATETIME NOT NULL,
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    peer_key TEXT NOT NULL,
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    peer_ip TEXT,
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    peer_name TEXT,
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    rx_bytes INTEGER,
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    tx_bytes INTEGER,
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    handshake_seconds INTEGER,
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    samples_count INTEGER DEFAULT 1,
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    min_rx_rate INTEGER,
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    max_rx_rate INTEGER,
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    min_tx_rate INTEGER,
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    max_tx_rate INTEGER,
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
+);
+
+-- Таблицы для агрегированной статистики
+CREATE TABLE interface_stats_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    iface TEXT NOT NULL,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_rx_bytes INTEGER,
+    max_rx_bytes INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wg_peers_agg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    peer_key TEXT NOT NULL,
+    peer_ip TEXT,
+    peer_name TEXT,
+    avg_rx_bytes REAL,
+    avg_tx_bytes REAL,
+    sum_rx_bytes INTEGER,
+    sum_tx_bytes INTEGER,
+    min_handshake INTEGER,
+    max_handshake INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Индексы для агрегированных таблиц
+CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
+CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
 
 -- Таблица для логирования задач демона
 CREATE TABLE tasks_log (
@@ -244,9 +805,9 @@ CREATE TABLE config (
 );
 
 -- Таблица для отслеживания последних запусков задач
-CREATE TABLE task_last_run (
+CREATE TABLE task_schedule (
     task_key TEXT PRIMARY KEY,
-    last_run DATETIME,
+    last_run INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
