@@ -4,7 +4,7 @@
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запуск: ./nm-install.sh (от root, sudo НЕ нужен)
 
-VERSION="1.7.3"
+VERSION="1.7.4"
 
 set -e  # Выход при ошибке
 
@@ -183,11 +183,10 @@ create_database() {
     # Создаем таблицы
     sqlite3 "$DB_PATH" <<EOF
 -- Таблица для статистики интерфейсов
-CREATE TABLE interfaces_stats (
+CREATE TABLE interface_stats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    data_type TEXT NOT NULL,
     timestamp DATETIME NOT NULL,
-    interface TEXT NOT NULL,
+    iface TEXT NOT NULL,
     rx_bytes INTEGER,
     tx_bytes INTEGER,
     rx_packets INTEGER,
@@ -196,39 +195,31 @@ CREATE TABLE interfaces_stats (
     tx_errors INTEGER,
     rx_drop INTEGER,
     tx_drop INTEGER,
-    samples_count INTEGER DEFAULT 1,
-    min_rx_rate INTEGER,
-    max_rx_rate INTEGER,
-    min_tx_rate INTEGER,
-    max_tx_rate INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-
--- Таблица для статистики WireGuard клиентов
+EOF
+    
+    sqlite_safe "$DB_PATH" "CREATE INDEX IF NOT EXISTS idx_interface_stats_time ON interface_stats(timestamp, iface);" || true
+    
+    # Создаем таблицу для статистики WireGuard клиентов
+    sqlite3 "$DB_PATH" <<EOF
 CREATE TABLE wg_peers_stats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    data_type TEXT NOT NULL,
     timestamp DATETIME NOT NULL,
     peer_key TEXT NOT NULL,
     peer_ip TEXT,
     peer_name TEXT,
     rx_bytes INTEGER,
     tx_bytes INTEGER,
-    rx_errors INTEGER,
-    tx_errors INTEGER,
     handshake_seconds INTEGER,
-    samples_count INTEGER DEFAULT 1,
-    min_rx_rate INTEGER,
-    max_rx_rate INTEGER,
-    min_tx_rate INTEGER,
-    max_tx_rate INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-
--- Индексы для таблиц статистики
-CREATE INDEX idx_wg_peers_time ON wg_peers_stats(timestamp, peer_key);
-
--- Таблицы для агрегированной статистики
+EOF
+    
+    sqlite_safe "$DB_PATH" "CREATE INDEX IF NOT EXISTS idx_wg_peers_time ON wg_peers_stats(timestamp, peer_key);" || true
+    
+    # Таблицы для агрегированной статистики
+    sqlite3 "$DB_PATH" <<EOF
 CREATE TABLE interface_stats_agg (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp INTEGER NOT NULL,
@@ -241,7 +232,11 @@ CREATE TABLE interface_stats_agg (
     max_rx_bytes INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-
+EOF
+    
+    sqlite_safe "$DB_PATH" "CREATE INDEX IF NOT EXISTS idx_interface_stats_agg_time ON interface_stats_agg(timestamp, iface);" || true
+    
+    sqlite3 "$DB_PATH" <<EOF
 CREATE TABLE wg_peers_agg (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp INTEGER NOT NULL,
@@ -252,126 +247,51 @@ CREATE TABLE wg_peers_agg (
     avg_tx_bytes REAL,
     sum_rx_bytes INTEGER,
     sum_tx_bytes INTEGER,
-    min_handshake INTEGER,
-    max_handshake INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-
--- Индексы для агрегированных таблиц
-CREATE INDEX idx_iface_agg_time ON interface_stats_agg(timestamp, iface);
-CREATE INDEX idx_peers_agg_time ON wg_peers_agg(timestamp, peer_key);
-
--- Таблица для логирования задач демона
-CREATE TABLE tasks_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_type TEXT NOT NULL,
-    rule_key TEXT,
-    started_at DATETIME,
-    finished_at DATETIME,
-    status TEXT,
-    records_processed INTEGER,
-    error_message TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- Таблица для хранения конфигурации в БД
-CREATE TABLE config (
-    key TEXT PRIMARY KEY,
-    value TEXT,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- Таблица для отслеживания последних запусков задач
-CREATE TABLE task_schedule (
-    task_key TEXT PRIMARY KEY,
-    last_run INTEGER NOT NULL DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- Таблица правил мониторинга (config_rules)
-CREATE TABLE config_rules (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    rule_type TEXT NOT NULL CHECK(rule_type IN ('collect', 'aggregate', 'cleanup')),
-    rule_key TEXT NOT NULL UNIQUE,
-    description TEXT NOT NULL,
-    interval_sec INTEGER NOT NULL DEFAULT 60,
-    window_sec INTEGER DEFAULT NULL,
-    retention_days INTEGER DEFAULT NULL,
-    enabled BOOLEAN DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- Индексы для оптимизации запросов
-CREATE INDEX idx_interfaces_type_time ON interfaces_stats(data_type, timestamp);
-CREATE INDEX idx_interfaces_iface_time ON interfaces_stats(interface, timestamp);
-CREATE INDEX idx_peers_type_time ON wg_peers_stats(data_type, timestamp);
-CREATE INDEX idx_peers_key_time ON wg_peers_stats(peer_key, timestamp);
-CREATE INDEX idx_tasks_type_status ON tasks_log(task_type, status);
-CREATE INDEX idx_tasks_time ON tasks_log(started_at);
-CREATE INDEX idx_rules_type_key ON config_rules(rule_type, rule_key);
-CREATE INDEX idx_rules_enabled ON config_rules(enabled, rule_type);
-
--- Импорт правил мониторинга из SQL-дампа (версия $VERSION)
-.read "${SCRIPT_DIR}/nm-config-rules.sql"
-
--- Представление для отчетов по интерфейсам (обновлено для новых типов данных)
-CREATE VIEW v_interface_daily AS
-SELECT 
-    date(timestamp) as day,
-    interface,
-    SUM(rx_bytes) as total_rx,
-    SUM(tx_bytes) as total_tx,
-    AVG(rx_bytes/300) as avg_rx_rate,
-    AVG(tx_bytes/300) as avg_tx_rate,
-    MAX(max_rx_rate) as peak_rx_rate,
-    MAX(max_tx_rate) as peak_tx_rate
-FROM interfaces_stats 
-WHERE data_type IN ('agg_5min', 'agg_hour')
-GROUP BY date(timestamp), interface;
-
--- Представление для отчетов по клиентам
-CREATE VIEW v_peers_daily AS
-SELECT 
-    date(timestamp) as day,
-    peer_name,
-    peer_ip,
-    SUM(rx_bytes) as total_rx,
-    SUM(tx_bytes) as total_tx,
-    COUNT(DISTINCT date(timestamp)) as days_active
-FROM wg_peers_stats 
-WHERE data_type = 'agg_hour'
-GROUP BY date(timestamp), peer_name, peer_ip;
-
 EOF
-
-    # Сохраняем конфигурацию в БД
-    sqlite3 "$DB_PATH" <<EOF
-INSERT INTO config (key, value) VALUES ('main_iface', '$MAIN_IFACE');
-INSERT INTO config (key, value) VALUES ('wg_iface', '$WG_IFACE');
-INSERT INTO config (key, value) VALUES ('install_date', datetime('now'));
-INSERT INTO config (key, value) VALUES ('version', '$VERSION');
-EOF
-
-    chmod 644 "$DB_PATH"
+    
+    sqlite_safe "$DB_PATH" "CREATE INDEX IF NOT EXISTS idx_wg_peers_agg_time ON wg_peers_agg(timestamp, peer_key);" || true
+    
     log "INFO" "База данных создана: $DB_PATH"
 }
+
+# Копирование скриптов
+copy_scripts() {
+    log "INFO" "Копирование скриптов в $BASE_DIR..."
+
+    # Копируем основные скрипты
+    cp nm-daemon.sh "$BASE_DIR/"
+    cp nm-monitor.sh "$BASE_DIR/"
+    cp nm-lib.sh "$BASE_DIR/"
+    cp nm-config.env "$BASE_DIR/"
+    cp nm-config-rules.sql "$BASE_DIR/"
+
+    # Делаем скрипты исполняемыми
+    chmod +x "$BASE_DIR/nm-daemon.sh"
+    chmod +x "$BASE_DIR/nm-monitor.sh"
+    chmod 644 "$BASE_DIR/nm-lib.sh"
+    chmod 644 "$BASE_DIR/nm-config.env"
+    chmod 644 "$BASE_DIR/nm-config-rules.sql"
+
+    log "INFO" "Скрипты и конфигурация скопированы (v${VERSION})"
+}
+# Настройка логов
 
 # Создание systemd сервиса
 create_systemd_service() {
     log "INFO" "Создание systemd сервиса..."
-    
+
     local service_file="/etc/systemd/system/nm-daemon.service"
-    
-tee "$service_file" <<EOF
+
+    tee "$service_file" <<SERVICEEOF
 # nm-daemon.service - systemd сервис для Network Monitor
 # Версия: $VERSION
 # Автор: TG: @smg38 smg38@yandex.ru
 
 [Unit]
 Description=Network Monitor Daemon
-After=network.target network-online.target wg-quick@%i.service
+After=network.target network-online.target
 Wants=network-online.target
 Documentation=https://github.com/your-repo/network-monitor
 
@@ -408,39 +328,11 @@ RestrictRealtime=yes
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SERVICEEOF
 
+    chmod 644 "$service_file"
     log "INFO" "Сервис создан: $service_file"
 }
-
-# Копирование скриптов
-copy_scripts() {
-    log "INFO" "Копирование скриптов в $BASE_DIR..."
-    
-# Копируем основной скрипт
-    cp nm-monitor.sh "$BASE_DIR/"
-    chmod 755 "$BASE_DIR/nm-monitor.sh"
-    
-    # Копируем демон
-    cp nm-daemon.sh "$BASE_DIR/"
-    chmod 755 "$BASE_DIR/nm-daemon.sh"
-    
-    # Копируем чистый env-конфиг (без bash-кода)
-    cp nm-config.env "$BASE_DIR/nm-config.env"
-    chmod 644 "$BASE_DIR/nm-config.env"
-    
-    # Копируем конфигурацию (функции + правила)
-    cp nm-config.sh "$BASE_DIR/"
-    chmod 644 "$BASE_DIR/nm-config.sh"
-    
-    # Копируем SQL-правила мониторинга
-    cp nm-config-rules.sql "$BASE_DIR/"
-    chmod 644 "$BASE_DIR/nm-config-rules.sql"
-    
-    log "INFO" "Скрипты и конфигурация скопированы (v${VERSION})"
-}
-
-# Настройка логов
 setup_logging() {
     log "INFO" "Настройка логирования..."
     
