@@ -1,37 +1,25 @@
 #!/bin/bash
 # nm-install.sh - Установщик системы мониторинга сети  
-# Версия: 1.6.4
+# Версия: 1.7.0
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запуск: ./nm-install.sh (от root, sudo НЕ нужен)
 
-VERSION="1.6.4"
+VERSION="1.7.0"
 
 set -e  # Выход при ошибке
 
 # Определяем директорию скрипта
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Загружаем общую библиотеку
+source "${SCRIPT_DIR}/nm-lib.sh"
+
+# Устанавливаем контекст логирования
+LOG_CONTEXT="install"
+
 # Загружаем конфигурацию
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/nm-config.sh"
-
-# Функция логирования
-log() {
-    local level="$1"
-    local message="$2"
-    local timestamp
-    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
-    # Проверяем уровень логирования
-    case "$LOG_LEVEL" in
-        "DEBUG") ;;
-        "INFO")  [ "$level" = "DEBUG" ] && return ;;
-        "WARN")  [[ "$level" =~ ^(DEBUG|INFO)$ ]] && return ;;
-        "ERROR") [[ "$level" =~ ^(DEBUG|INFO|WARN)$ ]] && return ;;
-    esac
-    
-    echo -e "${timestamp} [${level}] ${message}" | tee -a "${LOG_DIR}/install.log"
-}
 
 # Обработка аргументов командной строки
 parse_args() {

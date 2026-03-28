@@ -20,14 +20,17 @@ source "${SCRIPT_DIR}/nm-config.sh"
 get_current_rates() {
     local interface="$1"
     
-    # Получаем две последние записи
+    # Проверка валидности имени интерфейса
+    if ! validate_interface_name "$interface"; then
+        log "ERROR" "Неверное имя интерфейса: $interface"
+        echo "0|0"
+        return 1
+    fi
+    
+    # Получаем две последние записи (безопасный запрос)
     local data
-    data=$(sqlite3 "$DB_PATH" <<EOF
-SELECT timestamp, rx_bytes, tx_bytes FROM interfaces_stats 
-WHERE interface = '$interface' AND data_type = 'raw'
-ORDER BY timestamp DESC LIMIT 2;
-EOF
-)
+    local query="SELECT timestamp, rx_bytes, tx_bytes FROM interfaces_stats WHERE interface = '${interface}' AND data_type = 'raw' ORDER BY timestamp DESC LIMIT 2;"
+    data=$(sqlite_safe "$DB_PATH" "$query") || { echo "0|0"; return 1; }
     
     if [ "$(echo "$data" | wc -l)" -lt 2 ]; then
         echo "0|0"
