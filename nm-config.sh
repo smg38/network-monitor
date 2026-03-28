@@ -77,29 +77,23 @@ load_config_rules() {
     
     echo "📥 Загрузка активных правил из БД config_rules..."
     
-    # Очищаем массивы
-    unset COLLECT_RULES AGGREGATE_RULES CLEANUP_RULES
-    declare -A COLLECT_RULES=()
-    declare -A AGGREGATE_RULES=()
-    declare -A CLEANUP_RULES=()
+    # Очищаем массивы (но не объявляем заново, чтобы сохранить глобальную область)
+    COLLECT_RULES=()
+    AGGREGATE_RULES=()
+    CLEANUP_RULES=()
     
-    # Загружаем правила сбора
+    # Загружаем правила сбора - формат: rule_key -> "description|interval"
     while IFS='|' read -r rule_key description interval; do
         [[ -z "$rule_key" ]] && continue
-        [ -n "$rule_key" ] && COLLECT_RULES["$rule_key"]="$description"
+        [ -n "$rule_key" ] && COLLECT_RULES["$rule_key"]="${description}|${interval}"
     done < <(sqlite3 "$DB_PATH" "SELECT rule_key, description, interval_sec FROM config_rules WHERE rule_type='collect' AND enabled=1 ORDER BY interval_sec;")
     
-    # Загружаем правила агрегации
-    #while IFS='|' read -r rule_key output window description; do
+    # Загружаем правила агрегации - формат: rule_key -> "description|window|interval"
     while IFS='|' read -r rule_key description window interval; do
-        local input_type run_interval
-        input_type=$(echo "$rule_key" | cut -d: -f1)
-        run_interval=$(echo "$rule_key" | cut -d: -f2)
-        #[ -n "$output" ] && AGGREGATE_RULES["${input_type}:${run_interval}"]="${output}:${window}:${description}"
-        [ -n "$description" ] && AGGREGATE_RULES["${input_type}:${run_interval}"]="${description}:${window}:${interval}"
+        [ -n "$rule_key" ] && AGGREGATE_RULES["$rule_key"]="${description}|${window}|${interval}"
     done < <(sqlite3 "$DB_PATH" "SELECT rule_key, description, window_sec, interval_sec FROM config_rules WHERE rule_type='aggregate' AND enabled=1 ORDER BY interval_sec;")
     
-    # Загружаем правила очистки
+    # Загружаем правила очистки - формат: data_type -> retention_days
     while IFS='|' read -r data_type retention; do
         [ -n "$data_type" ] && CLEANUP_RULES["$data_type"]="$retention"
     done < <(sqlite3 "$DB_PATH" "SELECT rule_key, retention_days FROM config_rules WHERE rule_type='cleanup' AND enabled=1;")
