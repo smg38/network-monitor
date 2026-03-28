@@ -1,6 +1,6 @@
 #!/bin/bash
 # nm-daemon.sh - Демон сбора и агрегации данных сетевого мониторинга
-# Версия: 1.6.4
+# Версия: 1.6.5
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запускается как systemd сервис
 
@@ -54,19 +54,40 @@ log() {
 # Загружаем базовый конфиг + правила из БД (v1.6.4)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Базовые переменные из env (systemd)
-if [ -f "${SCRIPT_DIR}/nm-config.env" ]; then
-    # shellcheck disable=SC1091
-    source "${SCRIPT_DIR}/nm-config.env"
-    log "INFO" "Загружен базовый конфиг из nm-config.env"
-else
-    log "ERROR" "nm-config.env не найден: ${SCRIPT_DIR}/nm-config.env"
+# 1. Загружаем ПОЛНЫЙ конфиг (а не env!)
+source "${SCRIPT_DIR}/nm-config.sh"
+
+# 2. Гарантируем объявление массивов (защита от -u)
+# Гарантия существования массивов (без поломки)
+declare -A COLLECT_RULES=()
+declare -A AGGREGATE_RULES=()
+declare -A CLEANUP_RULES=()
+# declare -A COLLECT_RULES=("${COLLECT_RULES[@]:-}")
+# declare -A AGGREGATE_RULES=("${AGGREGATE_RULES[@]:-}")
+# declare -A CLEANUP_RULES=("${CLEANUP_RULES[@]:-}")
+
+# 3. Принудительная загрузка правил
+load_config_rules db
+
+# 4. Валидация
+if [ ${#COLLECT_RULES[@]} -eq 0 ]; then
+    echo "❌ CRITICAL: COLLECT_RULES пуст → демон не может работать"
     exit 1
 fi
 
+# Базовые переменные из env (systemd)
+# if [ -f "${SCRIPT_DIR}/nm-config.env" ]; then
+#     # shellcheck disable=SC1091
+#     source "${SCRIPT_DIR}/nm-config.env"
+#     log "INFO" "Загружен базовый конфиг из nm-config.env"
+# else
+#     log "ERROR" "nm-config.env не найден: ${SCRIPT_DIR}/nm-config.env"
+#     exit 1
+# fi
+
 # Загружаем динамические правила из БД (функция из nm-config.sh)
 # shellcheck disable=SC1091
-source "${SCRIPT_DIR}/nm-config.sh"     # Локальная копия в директории демона (автозагрузка правил)
+#source "${SCRIPT_DIR}/nm-config.sh"     # Локальная копия в директории демона (автозагрузка правил)
 
 collect_count=${#COLLECT_RULES[@]}
 aggregate_count=${#AGGREGATE_RULES[@]}

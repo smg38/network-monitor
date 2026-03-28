@@ -85,6 +85,7 @@ load_config_rules() {
     
     # Загружаем правила сбора
     while IFS='|' read -r rule_key description interval; do
+        [[ -z "$rule_key" ]] && continue
         [ -n "$rule_key" ] && COLLECT_RULES["$rule_key"]="$description"
     done < <(sqlite3 "$DB_PATH" "SELECT rule_key, description, interval_sec FROM config_rules WHERE rule_type='collect' AND enabled=1 ORDER BY interval_sec;")
     
