@@ -1,92 +1,20 @@
 #!/bin/bash
 # nm-monitor.sh - Клиент для формирования отчетов и live-мониторинга
-# Версия: 1.6
+# Версия: 1.7.0
 # Автор: TG: @smg38 smg38@yandex.ru
 # Использование: ./nm-monitor.sh [--live|--summary|--daily|--weekly|--monthly|--top N|--period YYYY-MM-DD YYYY-MM-DD|--help]
 
 set -euo pipefail
 
-# Функция цветов
-setup_colors() {
-    if [ -t 1 ]; then
-        export RED='\033[0;31m'
-        export GREEN='\033[0;32m'
-        export YELLOW='\033[0;33m'
-        export BLUE='\033[0;34m'
-        export MAGENTA='\033[0;35m'
-        export CYAN='\033[0;36m'
-        export WHITE='\033[0;37m'
-        export BOLD='\033[1m'
-        export NC='\033[0m'
-    else
-        unset RED GREEN YELLOW BLUE MAGENTA CYAN WHITE BOLD NC
-    fi
-}
+# Загружаем общую библиотеку (заменяет дублирование функций)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/nm-lib.sh"
 
-setup_colors
+# Устанавливаем контекст логирования для этого скрипта
+LOG_CONTEXT="monitor"
 
 # Загружаем конфигурацию
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck disable=SC1091
-#source "${SCRIPT_DIR}/nm-config.env"
 source "${SCRIPT_DIR}/nm-config.sh"
-
-# Функция логирования
-log() {
-    local level="$1"
-    local message="$2"
-    local timestamp
-    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
-    if [ "$level" = "ERROR" ]; then
-        echo >&2 "${timestamp} [${level}] ${message}"
-    else
-        echo "${timestamp} [${level}] ${message}"
-    fi
-}
-
-# Функция форматирования байт в человеко-читаемый вид
-format_bytes() {
-    local bytes precision=2
-    bytes="$1"
-    
-    if [ -z "$bytes" ] || [ "$bytes" -lt 0 ]; then
-        echo "0 B"
-        return
-    fi
-    
-    if [ "$bytes" -lt 1024 ]; then
-        echo "${bytes} B"
-    elif [ "$bytes" -lt 1048576 ]; then
-        echo "$(echo "scale=$precision; $bytes/1024" | bc) KB"
-    elif [ "$bytes" -lt 1073741824 ]; then
-        echo "$(echo "scale=$precision; $bytes/1048576" | bc) MB"
-    elif [ "$bytes" -lt 1099511627776 ]; then
-        echo "$(echo "scale=$precision; $bytes/1073741824" | bc) GB"
-    else
-        echo "$(echo "scale=$precision; $bytes/1099511627776" | bc) TB"
-    fi
-}
-
-# Функция форматирования скорости
-format_speed() {
-    local bytes_per_sec=$1
-    format_bytes "$bytes_per_sec" | sed 's/\(.*\)/\1\/s/'
-}
-
-# Функция рисования прогресс-бара
-draw_bar() {
-    local percent=$1
-    local width=50
-    local filled empty
-    filled=$(echo "scale=0; $percent * $width / 100" | bc)
-    empty=$((width - filled))
-    
-    printf "["
-    printf "%${filled}s" | tr ' ' '█'
-    printf "%${empty}s" | tr ' ' '░'
-    printf "] %3.0f%%" "$percent"
-}
 
 # Функция получения текущей скорости (дельты)
 get_current_rates() {
@@ -111,14 +39,14 @@ EOF
     prev=$(echo "$data" | tail -1)
     
     local latest_time latest_rx latest_tx
-    latest_time=$(echo "$latest" | cut -d'|' -f1)
-    latest_rx=$(echo "$latest" | cut -d'|' -f2)
-    latest_tx=$(echo "$latest" | cut -d'|' -f3)
+    latest_time=$(parse_field "$latest" "|" 1)
+    latest_rx=$(parse_field "$latest" "|" 2)
+    latest_tx=$(parse_field "$latest" "|" 3)
     
     local prev_time prev_rx prev_tx
-    prev_time=$(echo "$prev" | cut -d'|' -f1)
-    prev_rx=$(echo "$prev" | cut -d'|' -f2)
-    prev_tx=$(echo "$prev" | cut -d'|' -f3)
+    prev_time=$(parse_field "$prev" "|" 1)
+    prev_rx=$(parse_field "$prev" "|" 2)
+    prev_tx=$(parse_field "$prev" "|" 3)
     
     local time_diff
     time_diff=$(($(date -d "$latest_time" +%s) - $(date -d "$prev_time" +%s)))
@@ -148,8 +76,8 @@ live_mode() {
         # Получаем текущие скорости
     local main_rates main_rx_rate main_tx_rate
     main_rates=$(get_current_rates "$MAIN_IFACE")
-    main_rx_rate=$(echo "$main_rates" | cut -d'|' -f1)
-    main_tx_rate=$(echo "$main_rates" | cut -d'|' -f2)
+    main_rx_rate=$(parse_field "$main_rates" "|" 1)
+    main_tx_rate=$(parse_field "$main_rates" "|" 2)
         
         # Получаем статистику за сегодня
     local today main_today main_today_rx main_today_tx
@@ -164,8 +92,8 @@ WHERE interface = '$MAIN_IFACE'
     AND date(timestamp) = '$today';
 EOF
 )
-    main_today_rx=$(echo "$main_today" | cut -d'|' -f1)
-    main_today_tx=$(echo "$main_today" | cut -d'|' -f2)
+    main_today_rx=$(parse_field "$main_today" "|" 1)
+    main_today_tx=$(parse_field "$main_today" "|" 2)
         
         # Заголовок
         echo "${BOLD}${BLUE}┌─────────────────────────────────────────────────────────────┐${NC}"
@@ -180,9 +108,9 @@ EOF
             local wg_rates
             wg_rates=$(get_current_rates "$WG_IFACE")
             local wg_rx_rate
-            wg_rx_rate=$(echo "$wg_rates" | cut -d'|' -f1)
+            wg_rx_rate=$(parse_field "$wg_rates" "|" 1)
             local wg_tx_rate
-            wg_tx_rate=$(echo "$wg_rates" | cut -d'|' -f2)
+            wg_tx_rate=$(parse_field "$wg_rates" "|" 2)
             
             local wg_today
             wg_today=$(sqlite3 "$DB_PATH" <<EOF
@@ -196,9 +124,9 @@ WHERE interface = '$WG_IFACE'
 EOF
 )
             local wg_today_rx
-            wg_today_rx=$(echo "$wg_today" | cut -d'|' -f1)
+            wg_today_rx=$(parse_field "$wg_today" "|" 1)
             local wg_today_tx
-            wg_today_tx=$(echo "$wg_today" | cut -d'|' -f2)
+            wg_today_tx=$(parse_field "$wg_today" "|" 2)
             
             printf "${BOLD}${BLUE}│${NC}  ${GREEN}%-15s${NC}: ↓ %10s  ↑ %10s  (сегодня: %s / %s) ${BLUE}│${NC}\n" "$WG_IFACE" "$(format_speed "$wg_rx_rate")" "$(format_speed "$wg_tx_rate")" "$(format_bytes "$wg_today_rx")" "$(format_bytes "$wg_today_tx")"
         fi
@@ -264,9 +192,9 @@ WHERE interface = '$MAIN_IFACE'
 EOF
 )
         local peak_rx
-        peak_rx=$(echo "$peaks" | cut -d'|' -f1)
+        peak_rx=$(parse_field "$peaks" "|" 1)
         local peak_tx
-        peak_tx=$(echo "$peaks" | cut -d'|' -f2)
+        peak_tx=$(parse_field "$peaks" "|" 2)
         
         printf "${BOLD}${BLUE}│${NC}  Пик сегодня: ↓ %10s  ↑ %10s                 ${BLUE}│${NC}\n" "$(format_speed "$peak_rx")" "$(format_speed "$peak_tx")"
         
