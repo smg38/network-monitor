@@ -1,6 +1,6 @@
 #!/bin/bash
 # nm-daemon.sh - Демон сбора и агрегации данных сетевого мониторинга
-# Версия: 1.7.0
+# Версия: 1.7.1
 # Автор: TG: @smg38 smg38@yandex.ru
 # Запускается как systemd сервис
 
@@ -16,13 +16,13 @@ else
     exit 1
 fi
 
-# Загружаем базовый конфиг + правила из БД (v1.7.0)
+# Загружаем базовый конфиг + правила из БД (v1.7.1)
 source "${SCRIPT_DIR}/nm-config.sh"
 
 # Гарантируем объявление массивов (защита от -u)
-declare -A COLLECT_RULES=("${COLLECT_RULES[@]:-}")
-declare -A AGGREGATE_RULES=("${AGGREGATE_RULES[@]:-}")
-declare -A CLEANUP_RULES=("${CLEANUP_RULES[@]:-}")
+declare -A COLLECT_RULES=()
+declare -A AGGREGATE_RULES=()
+declare -A CLEANUP_RULES=()
 
 # Принудительная загрузка правил
 load_config_rules db

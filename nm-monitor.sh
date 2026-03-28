@@ -1,6 +1,6 @@
 #!/bin/bash
 # nm-monitor.sh - Клиент для формирования отчетов и live-мониторинга
-# Версия: 1.7.0
+# Версия: 1.7.1
 # Автор: TG: @smg38 smg38@yandex.ru
 # Использование: ./nm-monitor.sh [--live|--summary|--daily|--weekly|--monthly|--top N|--period YYYY-MM-DD YYYY-MM-DD|--help]
 
